@@ -1,0 +1,55 @@
+# ── Python ───────────────────────────────────────────────────
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Environment ──────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ── Model files (simpan di Google Drive, bukan git) ──────────
+ml/sentiment/model/
+ml/sentiment/baseline/*.pkl
+ml/recommendation/*.pkl
+ml/recommendation/*.bin
+ml/chatbot/vector_store/
+
+# ── Dataset (jangan commit) ──────────────────────────────────
+data/*.xlsx
+data/*.csv
+data/*.json
+
+# ── IDE ──────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.user
+*.swp
+*.swo
+
+# ── OS ───────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Logs ─────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Test & coverage ──────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ── Jupyter ──────────────────────────────────────────────────
+.ipynb_checkpoints/
