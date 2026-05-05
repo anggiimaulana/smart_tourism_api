@@ -36,11 +36,9 @@ async def predict_sentiment(
     Error 503 = model file belum tersedia di folder ml/sentiment/.
     Jalankan training di Colab terlebih dahulu.
     """
-    # TODO: implementasi di SentimentService
-    # service = SentimentService()
-    # result  = await service.predict_and_save(payload, db)
-    # return BaseResponse(data=result)
-    raise HTTPException(status_code=501, detail="Implementasi di SentimentService — Anggi & Ikhsan")
+    service = SentimentService()
+    result = await service.predict_and_save(payload, db)
+    return BaseResponse(data=result)
 
 
 @router.post(
@@ -56,11 +54,9 @@ async def predict_batch(
     Digunakan untuk memproses hasil scraping massal dari Google Maps.
     Proses berjalan secara berurutan (sequential), bukan parallel.
     """
-    # TODO: implementasi di SentimentService
-    # service = SentimentService()
-    # results = await service.predict_batch(payload.items, db)
-    # return BaseResponse(data=results)
-    raise HTTPException(status_code=501, detail="Implementasi di SentimentService — Anggi & Ikhsan")
+    service = SentimentService()
+    results = await service.predict_batch(payload.items, db)
+    return BaseResponse(data=results)
 
 
 @router.get(
@@ -76,11 +72,9 @@ async def get_summary(
     """
     Mengembalikan agregat: total ulasan, jumlah positif/negatif, persentase.
     """
-    # TODO: implementasi di SentimentService
-    # service = SentimentService()
-    # result  = await service.get_summary(wilayah, tipe_tempat, db)
-    # return BaseResponse(data=result)
-    raise HTTPException(status_code=501, detail="Implementasi di SentimentService")
+    service = SentimentService()
+    result = await service.get_summary(wilayah, tipe_tempat, db)
+    return BaseResponse(data=result)
 
 
 @router.post(

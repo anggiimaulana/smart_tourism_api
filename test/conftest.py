@@ -9,6 +9,8 @@ from sqlalchemy.pool import NullPool
 
 from app.main import app
 from app.core.database import get_db, Base
+from app.core.security import create_access_token, hash_password
+from app.models.user import User
  
 # Gunakan database test terpisah (jangan pakai DB development!)
 TEST_DATABASE_URL = "postgresql+asyncpg://postgres:root@localhost:5432/smart_tourism_test"
@@ -52,11 +54,26 @@ async def client(db_session: AsyncSession):
 @pytest_asyncio.fixture
 async def admin_token(client: AsyncClient) -> str:
     """Token JWT admin untuk test endpoint yang butuh auth admin."""
-    resp = await client.post("/api/v1/auth/login", json={
-        "email": "admin@smarttourism.id",
-        "password": "Admin1234"
-    })
-    return resp.json()["data"]["access_token"]
+    async with create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=NullPool).begin() as conn:
+        session_factory = sessionmaker(bind=conn, class_=AsyncSession, expire_on_commit=False)
+    async with sessionmaker(create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=NullPool), class_=AsyncSession, expire_on_commit=False)() as session:
+        existing = await session.execute(text("SELECT id FROM users WHERE email = :email"), {"email": "admin@smarttourism.id"})
+        row = existing.fetchone()
+        if row:
+            user_id = str(row.id)
+        else:
+            admin = User(
+                id=uuid.uuid4(),
+                nama="Admin Test",
+                email="admin@smarttourism.id",
+                password_hash=hash_password("Admin1234"),
+                role="admin",
+                is_active=True,
+            )
+            session.add(admin)
+            await session.commit()
+            user_id = str(admin.id)
+    return create_access_token({"sub": user_id, "role": "admin"})
  
  
 @pytest_asyncio.fixture
