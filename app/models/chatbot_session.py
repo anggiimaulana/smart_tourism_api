@@ -1,8 +1,9 @@
 import uuid
-from sqlalchemy import Column, String, Float, DateTime, Enum as PgEnum
+from sqlalchemy import Column, String, Float, DateTime
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 from app.core.database import Base
+from app.models.enums import wilayah_enum
  
  
 class ChatbotSession(Base):
@@ -14,8 +15,7 @@ class ChatbotSession(Base):
     messages            = Column(JSONB, nullable=False, default=list)
     latitude            = Column(Float)
     longitude           = Column(Float)
-    wilayah_terdeteksi  = Column(PgEnum("Indramayu","Cirebon","Majalengka","Kuningan",
-                                       name="wilayah_enum"))
+    wilayah_terdeteksi  = Column(wilayah_enum)
     created_at          = Column(DateTime(timezone=True), server_default=func.now())
     updated_at          = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
  

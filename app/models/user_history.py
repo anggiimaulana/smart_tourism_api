@@ -1,7 +1,8 @@
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, Enum as PgEnum, CheckConstraint
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, CheckConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from app.core.database import Base
+from app.models.enums import tipe_tempat_enum
  
  
 class UserHistory(Base):
@@ -9,8 +10,7 @@ class UserHistory(Base):
  
     id           = Column(Integer, primary_key=True, autoincrement=True)
     user_id      = Column(UUID(as_uuid=True), nullable=False, index=True)
-    tipe_tempat  = Column(PgEnum("wisata","kuliner","nongkrong", name="tipe_tempat_enum"),
-                         nullable=False)
+    tipe_tempat  = Column(tipe_tempat_enum, nullable=False)
     tempat_id    = Column(Integer, nullable=False)
     tempat_kode  = Column(String(20), nullable=False)
     aksi         = Column(String(30), nullable=False)

@@ -2,11 +2,12 @@ import uuid
 
 from sqlalchemy import (
     Column, Integer, String, Text, Float, Numeric,
-    Time, Enum as PgEnum, DateTime, ARRAY, ForeignKey
+    Time, DateTime, ARRAY, ForeignKey
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from app.core.database import Base
+from app.models.enums import sentimen_enum, status_enum, wilayah_enum
  
  
 class Nongkrong(Base):
@@ -17,8 +18,7 @@ class Nongkrong(Base):
     kode                 = Column(String(20), nullable=False, unique=True, index=True)
     id_wisata_ref        = Column(String(20), ForeignKey("wisata.kode", ondelete="SET NULL"))
     nama                 = Column(String(255), nullable=False)
-    wilayah              = Column(PgEnum("Indramayu","Cirebon","Majalengka","Kuningan",
-                                        name="wilayah_enum"), nullable=False)
+    wilayah              = Column(wilayah_enum, nullable=False)
     kecamatan            = Column(String(100))
     alamat_lengkap       = Column(Text)
     latitude             = Column(Float)
@@ -41,9 +41,8 @@ class Nongkrong(Base):
     gambar               = Column(ARRAY(String))
     sumber_data          = Column(String(100))
     catatan              = Column(Text)
-    status               = Column(PgEnum("aktif","nonaktif","draft", name="status_enum"),
-                                 nullable=False, default="draft")
-    sentimen             = Column(PgEnum("positif","negatif","netral", name="sentimen_enum"))
+    status               = Column(status_enum, nullable=False, default="draft")
+    sentimen             = Column(sentimen_enum)
     skor_sentimen        = Column(Numeric(5, 4))
     total_ulasan_scraped = Column(Integer, default=0)
     total_positif        = Column(Integer, default=0)

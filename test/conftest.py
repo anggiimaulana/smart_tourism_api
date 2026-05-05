@@ -1,40 +1,37 @@
-import asyncio
-import pytest
+import uuid
+
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
- 
+from sqlalchemy.pool import NullPool
+
 from app.main import app
 from app.core.database import get_db, Base
  
 # Gunakan database test terpisah (jangan pakai DB development!)
-TEST_DATABASE_URL = "postgresql+asyncpg://postgres:password@localhost:5432/smart_tourism_test"
- 
-test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
-TestSession  = sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
- 
- 
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
- 
- 
-@pytest_asyncio.fixture(scope="session", autouse=True)
-async def setup_database():
-    """Buat semua tabel sebelum test dimulai, drop setelah selesai."""
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
- 
- 
+TEST_DATABASE_URL = "postgresql+asyncpg://postgres:root@localhost:5432/smart_tourism_test"
+
+
 @pytest_asyncio.fixture
-async def db_session():
+async def test_engine():
+    engine = create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=NullPool)
+    async with engine.begin() as conn:
+        await conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
+        await conn.execute(text("CREATE SCHEMA public"))
+        await conn.run_sync(Base.metadata.create_all)
+    yield engine
+    async with engine.begin() as conn:
+        await conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
+        await conn.execute(text("CREATE SCHEMA public"))
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def db_session(test_engine):
     """Provide async DB session per test — rollback otomatis setelah tiap test."""
+    TestSession = sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
     async with TestSession() as session:
         yield session
         await session.rollback()

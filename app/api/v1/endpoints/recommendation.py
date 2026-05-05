@@ -39,13 +39,11 @@ async def get_recommendations(
     Endpoint ini bisa diakses tanpa login.
     Jika login, user_id diambil otomatis dari token.
     """
-    # TODO: implementasi di RecommendationService
-    # if current_user:
-    #     payload.user_id = str(current_user.id)
-    # service = RecommendationService()
-    # result  = await service.recommend(payload, db)
-    # return BaseResponse(data=result)
-    raise HTTPException(status_code=501, detail="Implementasi di RecommendationService — Rifqy")
+    if current_user:
+        payload.user_id = str(current_user.id)
+    service = RecommendationService()
+    result = await service.recommend(payload, db)
+    return BaseResponse(data=result)
 
 
 @router.post(
@@ -68,13 +66,11 @@ async def create_planning(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user_optional),
 ):
-    # TODO: implementasi di RecommendationService
-    # if current_user:
-    #     payload.user_id = str(current_user.id)
-    # service = RecommendationService()
-    # result  = await service.create_planning(payload, db)
-    # return BaseResponse(data=result)
-    raise HTTPException(status_code=501, detail="Implementasi di RecommendationService — Rifqy")
+    if current_user:
+        payload.user_id = str(current_user.id)
+    service = RecommendationService()
+    result = await service.create_planning(payload, db)
+    return BaseResponse(data=result)
 
 
 @router.post(
@@ -96,8 +92,9 @@ async def track_history(
     payload: TrackHistoryRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    # TODO: implementasi di RecommendationService
-    # service = RecommendationService()
-    # await service.track_history(payload, db)
-    # return BaseResponse(message="Interaksi berhasil dicatat")
-    raise HTTPException(status_code=501, detail="Implementasi di RecommendationService — Rifqy")
+    service = RecommendationService()
+    try:
+        await service.track_history(payload, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return BaseResponse(message="Interaksi berhasil dicatat")

@@ -2,11 +2,12 @@ import uuid
 
 from sqlalchemy import (
     Column, Integer, String, Text, Boolean, Float, Numeric,
-    Time, Enum as PgEnum, DateTime, ARRAY
+    Time, DateTime, ARRAY
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from app.core.database import Base
+from app.models.enums import kategori_wisata_enum, sentimen_enum, status_enum, wilayah_enum
  
  
 class Wisata(Base):
@@ -16,15 +17,12 @@ class Wisata(Base):
     uid                     = Column(UUID(as_uuid=True), nullable=False, unique=True, index=True, default=uuid.uuid4)
     kode                    = Column(String(20), nullable=False, unique=True, index=True)
     nama                    = Column(String(255), nullable=False)
-    wilayah                 = Column(PgEnum("Indramayu", "Cirebon", "Majalengka", "Kuningan",
-                                           name="wilayah_enum"), nullable=False)
+    wilayah                 = Column(wilayah_enum, nullable=False)
     kecamatan               = Column(String(100))
     alamat_lengkap          = Column(Text)
     latitude                = Column(Float)
     longitude               = Column(Float)
-    kategori_utama          = Column(PgEnum("Alam","Buatan","Budaya","Religi",
-                                           "Petualangan","Edukasi","Lainnya",
-                                           name="kategori_wisata"))
+    kategori_utama          = Column(kategori_wisata_enum)
     sub_kategori            = Column(String(100))
     jenis_tempat            = Column(String(100))
     deskripsi               = Column(Text)
@@ -47,10 +45,9 @@ class Wisata(Base):
     gambar                  = Column(ARRAY(String))
     sumber_data             = Column(String(100))
     diinput_oleh            = Column(String(100))
-    status                  = Column(PgEnum("aktif","nonaktif","draft", name="status_enum"),
-                                    nullable=False, default="draft")
+    status                  = Column(status_enum, nullable=False, default="draft")
     # Kolom AI — diisi otomatis sistem
-    sentimen                = Column(PgEnum("positif","negatif","netral", name="sentimen_enum"))
+    sentimen                = Column(sentimen_enum)
     skor_sentimen           = Column(Numeric(5, 4))
     total_ulasan_scraped    = Column(Integer, default=0)
     total_positif           = Column(Integer, default=0)
