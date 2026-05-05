@@ -31,8 +31,9 @@ async def list_wisata(
     Filter tersedia: wilayah, kategori_utama, sentimen, pencarian nama.
     Urutan default: rating_google DESC, skor_sentimen DESC.
     """
-    # TODO: panggil WisataService().list(...)
-    raise HTTPException(status_code=501, detail="Implementasi di WisataService")
+    service = WisataService()
+    result = await service.list(wilayah, kategori, sentimen, q, page, limit, db)
+    return BaseResponse(data=result)
 
 
 @router.get(
@@ -44,8 +45,11 @@ async def get_wisata(kode: str, db: AsyncSession = Depends(get_db)):
     """
     Contoh kode: WIS-IDM-001
     """
-    # TODO: panggil WisataService().get_by_kode(kode, db)
-    raise HTTPException(status_code=501, detail="Implementasi di WisataService")
+    service = WisataService()
+    result = await service.get_by_kode(kode, db)
+    if not result:
+        raise HTTPException(status_code=404, detail="Wisata tidak ditemukan")
+    return BaseResponse(data=result)
 
 
 @router.post(
@@ -60,8 +64,9 @@ async def create_wisata(payload: WisataCreate, db: AsyncSession = Depends(get_db
     Kode wisata digenerate otomatis: WIS-{WILAYAH}-{NOMOR}.
     Hanya admin yang bisa mengakses.
     """
-    # TODO: panggil WisataService().create(payload, db)
-    raise HTTPException(status_code=501, detail="Implementasi di WisataService")
+    service = WisataService()
+    result = await service.create(payload, db)
+    return BaseResponse(data=result)
 
 
 @router.patch(
@@ -74,8 +79,11 @@ async def update_wisata(kode: str, payload: WisataUpdate, db: AsyncSession = Dep
     """
     Hanya field yang dikirim yang akan diupdate (PATCH semantics).
     """
-    # TODO: panggil WisataService().update(kode, payload, db)
-    raise HTTPException(status_code=501, detail="Implementasi di WisataService")
+    service = WisataService()
+    result = await service.update(kode, payload, db)
+    if not result:
+        raise HTTPException(status_code=404, detail="Wisata tidak ditemukan")
+    return BaseResponse(data=result)
 
 
 @router.delete(
@@ -85,5 +93,8 @@ async def update_wisata(kode: str, payload: WisataUpdate, db: AsyncSession = Dep
     dependencies=[Depends(require_admin)],
 )
 async def delete_wisata(kode: str, db: AsyncSession = Depends(get_db)):
-    # TODO: panggil WisataService().delete(kode, db)
-    raise HTTPException(status_code=501, detail="Implementasi di WisataService")
+    service = WisataService()
+    deleted = await service.delete(kode, db)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Wisata tidak ditemukan")
+    return BaseResponse(message="Wisata berhasil dihapus")

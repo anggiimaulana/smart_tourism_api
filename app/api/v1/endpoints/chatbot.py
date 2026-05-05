@@ -38,11 +38,9 @@ async def ask_chatbot(
     """
     Latitude & longitude opsional — digunakan untuk mendeteksi wilayah terdekat.
     """
-    # TODO: implementasi di ChatbotService
-    # service = ChatbotService()
-    # result  = await service.ask(payload, db)
-    # return BaseResponse(data=result)
-    raise HTTPException(status_code=501, detail="Implementasi di ChatbotService — Vanes")
+    service = ChatbotService()
+    result = await service.ask(payload, db)
+    return BaseResponse(data=result)
 
 
 @router.get(
@@ -54,13 +52,11 @@ async def get_history(session_token: str, db: AsyncSession = Depends(get_db)):
     """
     Return semua pesan (user + assistant) dalam sesi ini.
     """
-    # TODO: implementasi di ChatbotService
-    # service = ChatbotService()
-    # result  = await service.get_history(session_token, db)
-    # if not result:
-    #     raise HTTPException(status_code=404, detail="Sesi tidak ditemukan")
-    # return BaseResponse(data=result)
-    raise HTTPException(status_code=501, detail="Implementasi di ChatbotService — Vanes")
+    service = ChatbotService()
+    result = await service.get_history(session_token, db)
+    if not result:
+        raise HTTPException(status_code=404, detail="Sesi tidak ditemukan")
+    return BaseResponse(data=result)
 
 
 @router.delete(

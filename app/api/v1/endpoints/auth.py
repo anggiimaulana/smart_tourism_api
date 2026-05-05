@@ -1,3 +1,5 @@
+import uuid
+
 # app/api/v1/endpoints/auth.py
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
@@ -23,8 +25,27 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
     Role default: pengunjung.
     Admin hanya bisa dibuat manual di DB atau via seed.
     """
-    # TODO: panggil AuthService.register(payload, db)
-    raise HTTPException(status_code=501, detail="Implementasi di AuthService")
+    exists = await db.execute(
+        text("SELECT 1 FROM users WHERE email = :email"),
+        {"email": payload.email},
+    )
+    if exists.fetchone():
+        raise HTTPException(status_code=409, detail="Email sudah terdaftar")
+
+    await db.execute(
+        text("""
+            INSERT INTO users (id, nama, email, password_hash, role, is_active)
+            VALUES (:id, :nama, :email, :password_hash, 'pengunjung', true)
+        """),
+        {
+            "id": str(uuid.uuid4()),
+            "nama": payload.nama.strip(),
+            "email": payload.email,
+            "password_hash": hash_password(payload.password),
+        },
+    )
+    await db.commit()
+    return BaseResponse(message="Registrasi berhasil")
 
 
 @router.post(
@@ -36,8 +57,28 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
     """
     Return access_token yang digunakan di header Authorization: Bearer <token>.
     """
-    # TODO: panggil AuthService.login(payload, db)
-    raise HTTPException(status_code=501, detail="Implementasi di AuthService")
+    row = await db.execute(
+        text("""
+            SELECT id, nama, email, password_hash, role, is_active
+            FROM users
+            WHERE email = :email
+        """),
+        {"email": payload.email},
+    )
+    user = row.fetchone()
+
+    if not user or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Email atau password salah")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Akun tidak aktif")
+
+    token = create_access_token({"sub": str(user.id), "role": user.role})
+    return BaseResponse(data=TokenResponse(
+        access_token=token,
+        role=user.role,
+        user_id=str(user.id),
+        nama=user.nama,
+    ))
 
 
 @router.get(

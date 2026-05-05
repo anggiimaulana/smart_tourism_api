@@ -1,5 +1,6 @@
 # app/services/wisata_service.py
 import math
+import uuid
 from typing import Optional
 
 from sqlalchemy import text
@@ -125,7 +126,7 @@ class WisataService:
 
         await db.execute(text("""
             INSERT INTO wisata (
-                kode, nama, wilayah, kecamatan, alamat_lengkap,
+                uid, kode, nama, wilayah, kecamatan, alamat_lengkap,
                 latitude, longitude, kategori_utama, sub_kategori, jenis_tempat,
                 deskripsi, harga_tiket_min, harga_tiket_max, gratis,
                 jam_buka, jam_tutup, hari_libur_operasional, estimasi_durasi_jam,
@@ -134,7 +135,7 @@ class WisataService:
                 link_google_maps, link_instagram, link_website, kontak,
                 gambar, sumber_data, diinput_oleh, status
             ) VALUES (
-                :kode, :nama, :wilayah, :kecamatan, :alamat,
+                :uid, :kode, :nama, :wilayah, :kecamatan, :alamat,
                 :lat, :lon, :kategori, :sub_kategori, :jenis,
                 :deskripsi, :harga_min, :harga_max, :gratis,
                 :jam_buka, :jam_tutup, :hari_libur, :durasi,
@@ -144,6 +145,7 @@ class WisataService:
                 :gambar, :sumber, :diinput, :status
             )
         """), {
+            "uid":          str(uuid.uuid4()),
             "kode":         kode,
             "nama":         payload.nama,
             "wilayah":      payload.wilayah.value,

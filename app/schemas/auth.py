@@ -12,8 +12,8 @@ class RegisterRequest(BaseModel):
     @classmethod
     def nama_valid(cls, v: str) -> str:
         v = v.strip()
-        if len(v) < 2 or len(v) > 150:
-            raise ValueError("Nama harus antara 2–150 karakter")
+        if len(v) < 1 or len(v) > 150:
+            raise ValueError("Nama harus antara 1–150 karakter")
         return v
  
     @field_validator("password")
