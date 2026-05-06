@@ -551,13 +551,18 @@ print(f'Berhasil insert: {inserted} baris ke sentiment_results')
 # ── Cell 15: Export Excel ─────────────────────────────────────────────────
 code("""\
 # ── CELL 15: Export Excel (alternatif jika DB tidak bisa diakses) ───
-OUTPUT_PATH = f'{DRIVE_DIR}/data/hasil_sentimen_{ANGGOTA}.xlsx'
 export_cols = ['tempat_nama','wilayah','tipe_tempat','tempat_kode',
                'teks_asli','teks_bersih','label_final',
                'sentimen_pred','confidence_pred']
-df_labeled[[c for c in export_cols if c in df_labeled.columns]].to_excel(OUTPUT_PATH, index=False)
-print(f'Hasil diekspor ke: {OUTPUT_PATH}')
-print('Kirim file ini ke ketua untuk import manual via 02_seed.py')
+
+wilayah_list = df_labeled['wilayah'].unique()
+for w in wilayah_list:
+    OUTPUT_PATH = f'{DRIVE_DIR}/data/hasil_sentimen_{str(w).capitalize()}.xlsx'
+    df_w = df_labeled[df_labeled['wilayah'] == w]
+    df_w[[c for c in export_cols if c in df_w.columns]].to_excel(OUTPUT_PATH, index=False)
+    print(f'Hasil {w} diekspor ke: {OUTPUT_PATH}')
+
+print('Kirim file-file ini ke ketua untuk import manual via seed database.')
 """)
 
 # ── Build notebook JSON ────────────────────────────────────────────────────
