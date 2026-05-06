@@ -440,6 +440,119 @@ async def seed_admin(session: AsyncSession):
     await session.commit()
     print("  [OK] Admin user dibuat: admin@smarttourism.id / admin123")
 
+# ── Seed Sentiment ────────────────────────────────────────────────────────────
+
+async def seed_sentiment(session: AsyncSession) -> tuple[int, int]:
+    inserted = 0
+    skipped = 0
+    wilayah_list = ["Indramayu", "Cirebon", "Majalengka", "Kuningan"]
+    
+    for w in wilayah_list:
+        file_path = Path(f"data/scrap/hasil_sentimen_{w}.xlsx")
+        
+        # Fallback jika penamaan filenya pakai huruf kecil
+        if not file_path.exists():
+            alt_path = Path(f"data/scrap/hasil_sentimen_{w.lower()}.xlsx")
+            if alt_path.exists():
+                file_path = alt_path
+            else:
+                # Cek jika ada file hasil_sentimen_Anggi.xlsx sebagai fallback sementara
+                anggi_path = Path(f"data/scrap/hasil_sentimen_Anggi.xlsx")
+                if anggi_path.exists() and w == "Cirebon":
+                    file_path = anggi_path
+                else:
+                    print(f"  [SKIP] File sentimen untuk {w} tidak ditemukan di {file_path}")
+                    continue
+
+        print(f"  Memproses file sentimen: {file_path}...")
+        try:
+            df = pd.read_excel(file_path)
+        except Exception as e:
+            print(f"  [ERROR] Gagal membaca {file_path}: {e}")
+            continue
+            
+        for _, row in df.iterrows():
+            kode = safe_str(row.get("tempat_kode"))
+            tempat_nama = safe_str(row.get("tempat_nama"))
+            tipe_tempat = safe_str(row.get("tipe_tempat", "wisata")).lower()
+            ulasan_asli = safe_str(row.get("teks_asli"))
+            
+            if not ulasan_asli:
+                continue
+
+            tempat_id = None
+            
+            table_map = {
+                "wisata": "wisata",
+                "kuliner": "kuliner",
+                "nongkrong": "nongkrong"
+            }
+            table_name = table_map.get(tipe_tempat)
+            
+            if table_name:
+                if kode:
+                    # Cari id berdasarkan kode
+                    query = await session.execute(
+                        text(f"SELECT id, kode FROM {table_name} WHERE kode = :kode LIMIT 1"),
+                        {"kode": kode}
+                    )
+                elif tempat_nama:
+                    # Cari id dan kode berdasarkan nama
+                    query = await session.execute(
+                        text(f"SELECT id, kode FROM {table_name} WHERE nama = :nama LIMIT 1"),
+                        {"nama": tempat_nama}
+                    )
+                else:
+                    query = None
+                    
+                if query:
+                    row_db = query.fetchone()
+                    if row_db:
+                        tempat_id = row_db[0]
+                        kode = row_db[1]
+                        
+            if not tempat_id or not kode:
+                # Skip jika tempat_id tidak ditemukan (karena required oleh constraint)
+                continue
+
+            # Cek duplikat menggunakan ulasan_asli dan tempat_kode
+            exists = await session.execute(
+                text("SELECT 1 FROM sentiment_results WHERE tempat_kode = :kode AND ulasan_asli = :ulasan_asli LIMIT 1"),
+                {"kode": kode, "ulasan_asli": ulasan_asli}
+            )
+            if exists.fetchone():
+                skipped += 1
+                continue
+                
+            sentimen = safe_str(row.get("sentimen_pred"), "netral").lower()
+            confidence = safe_float(row.get("confidence_pred"), 0.0)
+            ulasan_bersih = safe_str(row.get("teks_bersih"))
+
+            await session.execute(text("""
+                INSERT INTO sentiment_results (
+                    tipe_tempat, tempat_id, tempat_kode, ulasan_asli, ulasan_bersih,
+                    sentimen, confidence, model_used, sumber_scraping, scraped_at
+                ) VALUES (
+                    :tipe, :tempat_id, :kode, :asli, :bersih,
+                    :sentimen, :conf, :model, :sumber, :scraped_at
+                )
+            """), {
+                "tipe": tipe_tempat,
+                "tempat_id": tempat_id,
+                "kode": kode,
+                "asli": ulasan_asli,
+                "bersih": ulasan_bersih,
+                "sentimen": sentimen,
+                "conf": confidence,
+                "model": "indobert",
+                "sumber": "excel_seed",
+                "scraped_at": datetime.now()
+            })
+            inserted += 1
+            
+    await session.commit()
+    return inserted, skipped
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 async def main():
@@ -452,19 +565,23 @@ async def main():
     print("=" * 55)
 
     async with AsyncSessionLocal() as session:
-        print("\n[1/4] Seeding admin user...")
+        print("\n[1/5] Seeding admin user...")
         await seed_admin(session)
 
-        print("\n[2/4] Seeding wisata...")
+        print("\n[2/5] Seeding wisata...")
         ins, skip = await seed_wisata(session)
         print(f"  [OK] Inserted: {ins} | Skipped (duplikat): {skip}")
 
-        print("\n[3/4] Seeding kuliner...")
+        print("\n[3/5] Seeding kuliner...")
         ins, skip = await seed_kuliner(session)
         print(f"  [OK] Inserted: {ins} | Skipped (duplikat): {skip}")
 
-        print("\n[4/4] Seeding nongkrong...")
+        print("\n[4/5] Seeding nongkrong...")
         ins, skip = await seed_nongkrong(session)
+        print(f"  [OK] Inserted: {ins} | Skipped (duplikat): {skip}")
+        
+        print("\n[5/5] Seeding hasil analisis sentimen...")
+        ins, skip = await seed_sentiment(session)
         print(f"  [OK] Inserted: {ins} | Skipped (duplikat): {skip}")
 
     print("\n" + "=" * 55)

@@ -94,8 +94,6 @@ async def sync_sentimen(
     kode: str,
     db: AsyncSession = Depends(get_db),
 ):
-    # TODO: implementasi di SentimentService
-    # service = SentimentService()
-    # result  = await service.sync_sentimen(tipe_tempat, kode, db)
-    # return BaseResponse(message="Sentimen berhasil disinkronisasi", data=result)
-    raise HTTPException(status_code=501, detail="Implementasi di SentimentService — Admin")
+    service = SentimentService()
+    result  = await service.sync_sentimen(tipe_tempat, kode, db)
+    return BaseResponse(message="Sentimen berhasil disinkronisasi", data=result)
