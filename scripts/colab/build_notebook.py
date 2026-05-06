@@ -48,7 +48,8 @@ code("""\
 # ── CELL 2: Install Dependencies ────────────────────────────────────
 !pip install -q transformers datasets scikit-learn pandas openpyxl \\
              imbalanced-learn sqlalchemy asyncpg psycopg2-binary \\
-             python-dotenv seaborn matplotlib joblib
+             python-dotenv seaborn matplotlib joblib \\
+             sastrawi nltk wordcloud
 print('Dependencies installed.')
 """)
 
@@ -124,85 +125,185 @@ df_raw[['tempat_nama','wilayah','tipe_tempat','teks_asli','rating_google']].head
 
 # ── Cell 5: Preprocessing ─────────────────────────────────────────────────
 code("""\
-# ── CELL 5: Preprocessing Teks ──────────────────────────────────────
-import re
+# ── CELL 5: Preprocessing Teks (mengikuti pipeline referensi) ───────
+import re, string, nltk
+from nltk.tokenize import word_tokenize
+from nltk.corpus import stopwords
+from Sastrawi.Stemmer.StemmerFactory import StemmerFactory
 
+nltk.download('stopwords')
+nltk.download('punkt_tab')
+
+pd.options.mode.chained_assignment = None
+
+# Kamus slang — Indramayu + Cirebon + umum
 SLANG_DICT = {
-    'gak':'tidak','ga':'tidak','tdk':'tidak','ngga':'tidak','gk':'tidak',
-    'bgs':'bagus','mantap':'bagus','keren':'bagus',
-    'jelek':'buruk','ancur':'buruk','parah':'buruk',
-    'enak':'lezat','yummy':'lezat',
-    'murah':'terjangkau','rame':'ramai',
-    'bs':'bisa','hrs':'harus','sdh':'sudah','blm':'belum',
-    'udh':'sudah','aja':'saja','yg':'yang','dgn':'dengan',
-    'utk':'untuk','krn':'karena',
+    '@':'di', 'gak':'tidak', 'ga':'tidak', 'tdk':'tidak', 'ngga':'tidak',
+    'gk':'tidak', 'g':'tidak', 'tdk':'tidak', 'bgt':'banget',
+    'bgs':'bagus', 'maks':'maksimal', 'abis':'habis',
+    'masi':'masih', 'bs':'bisa', 'hrs':'harus', 'sdh':'sudah',
+    'blm':'belum', 'udh':'sudah', 'aja':'saja', 'yg':'yang',
+    'dgn':'dengan', 'utk':'untuk', 'krn':'karena',
     # Khas Indramayu / Cirebon
-    'ewean':'tidak','ora':'tidak','sing':'yang','maning':'lagi',
-    'arep':'mau','apik':'bagus','ayu':'cantik',
+    'ewean':'tidak', 'ora':'tidak', 'sing':'yang', 'maning':'lagi',
+    'arep':'mau', 'nganggo':'pakai', 'apik':'bagus', 'ayu':'cantik',
+    'mantap':'bagus', 'keren':'bagus', 'enak':'lezat', 'yummy':'lezat',
+    'murah':'terjangkau', 'rame':'ramai',
 }
 
-def preprocess(text: str) -> str:
-    if not isinstance(text, str): return ''
-    text = text.lower()
-    text = re.sub(r'http\\S+|www\\S+', '', text)
-    text = re.sub(r'@\\w+|#\\w+', '', text)
-    text = re.sub(r'[^\\w\\s]', ' ', text)
-    text = re.sub(r'\\d+', '', text)
-    words = [SLANG_DICT.get(w, w) for w in text.split()]
-    words = [w for w in words if w]
-    text  = ' '.join(words)
-    return re.sub(r'\\s+', ' ', text).strip()
+# Stemmer Sastrawi
+_factory = StemmerFactory()
+_stemmer = _factory.create_stemmer()
 
-df_raw['teks_bersih'] = df_raw['teks_asli'].apply(preprocess)
+def cleaningText(text):
+    text = re.sub(r'@[A-Za-z0-9]+', '', text)
+    text = re.sub(r'#[A-Za-z0-9]+', '', text)
+    text = re.sub(r'RT[\\s]', '', text)
+    text = re.sub(r'http\\S+', '', text)
+    text = re.sub(r'[0-9]+', '', text)
+    text = re.sub(r'[^\\w\\s]', '', text)
+    text = text.replace('\\n', ' ')
+    text = text.translate(str.maketrans('', '', string.punctuation))
+    return text.strip()
+
+def casefoldingText(text):
+    return text.lower()
+
+def fix_slangwords(text):
+    return ' '.join(SLANG_DICT.get(w.lower(), w) for w in text.split())
+
+def tokenizingText(text):
+    return word_tokenize(text)
+
+def filteringText(tokens):
+    id_stop = set(stopwords.words('indonesian'))
+    en_stop = set(stopwords.words('english'))
+    custom  = {'iya','yaa','gak','nya','na','sih','ku','di','ga','ya',
+               'gaa','loh','kah','woi','woii','woy','dong','deh','nih'}
+    all_stop = id_stop | en_stop | custom
+    return [t for t in tokens if t not in all_stop]
+
+def toSentence(tokens):
+    return ' '.join(tokens)
+
+# Jalankan pipeline bertahap
+df_raw['text_clean']    = df_raw['teks_asli'].apply(cleaningText)
+df_raw['text_casefolded']= df_raw['text_clean'].apply(casefoldingText)
+df_raw['text_slang']    = df_raw['text_casefolded'].apply(fix_slangwords)
+df_raw['text_tokens']   = df_raw['text_slang'].apply(tokenizingText)
+df_raw['text_filtered'] = df_raw['text_tokens'].apply(filteringText)
+df_raw['teks_bersih']   = df_raw['text_filtered'].apply(toSentence)
+
+# Buang baris kosong
 df_raw = df_raw[df_raw['teks_bersih'].str.len() > 5].reset_index(drop=True)
 print(f'Setelah preprocessing: {len(df_raw)} baris')
 df_raw[['teks_asli','teks_bersih']].head()
 """)
 
-# ── Cell 6: Labeling ──────────────────────────────────────────────────────
+# ── Cell 6: Labeling dengan lexicon skor numerik ─────────────────────────
 code("""\
-# ── CELL 6: Labeling Semi-Otomatis ──────────────────────────────────
-POSITIVE_WORDS = [
-    'bagus','indah','cantik','bersih','nyaman','lezat','terjangkau',
-    'ramah','recommended','keren','seru','menyenangkan','asri','sejuk',
-    'ramai','lengkap','strategis','mudah','cepat','memuaskan','puas',
-    'senang','mantap','enak','murah','apik','ayu',
-]
-NEGATIVE_WORDS = [
-    'buruk','kotor','mahal','sempit','panas','sepi','lambat','lama',
-    'kecewa','rusak','bau','jorok','tidak','kurang','parah','ancur',
-    'mengecewakan','susah','jauh','berbahaya','licin','becek','kumuh',
-    'ewean','ora',
-]
+# ── CELL 6: Labeling Semi-Otomatis (Lexicon Skor Numerik) ───────────
+# Mengunduh lexicon positif/negatif Indonesia dari GitHub (angelmetanosaa/dataset)
+import csv, requests
+from io import StringIO
 
-def label_rating(rating) -> str:
-    \"\"\"Gunakan rating sebagai fallback jika lexicon tidak konklusif.\"\"\"
-    try:
-        r = float(rating)
-        if r >= 4: return 'positif'
-        if r <= 2: return 'negatif'
-    except: pass
-    return 'netral'
+lexicon_positive = {}
+resp = requests.get('https://raw.githubusercontent.com/angelmetanosaa/dataset/main/lexicon_positive.csv')
+if resp.status_code == 200:
+    for row in csv.reader(StringIO(resp.text), delimiter=','):
+        try: lexicon_positive[row[0]] = int(row[1])
+        except: pass
+print(f'Kata positif dimuat: {len(lexicon_positive)}')
 
-def label_lexicon(row) -> str:
-    text   = str(row['teks_bersih']).lower().split()
-    words  = set(text)
-    pos    = sum(1 for w in POSITIVE_WORDS if w in words)
-    neg    = sum(1 for w in NEGATIVE_WORDS if w in words)
-    if pos > neg: return 'positif'
-    if neg > pos: return 'negatif'
-    return label_rating(row.get('rating_google', 3))
+lexicon_negative = {}
+resp = requests.get('https://raw.githubusercontent.com/angelmetanosaa/dataset/main/lexicon_negative.csv')
+if resp.status_code == 200:
+    for row in csv.reader(StringIO(resp.text), delimiter=','):
+        try: lexicon_negative[row[0]] = int(row[1])
+        except: pass
+print(f'Kata negatif dimuat: {len(lexicon_negative)}')
 
-df_raw['label_otomatis'] = df_raw.apply(label_lexicon, axis=1)
+def sentiment_analysis_lexicon(tokens):
+    \"\"\"Hitung skor: positif jika >0, negatif jika <0, netral jika =0.\"\"\"
+    score = 0
+    for w in tokens:
+        if w in lexicon_positive: score += lexicon_positive[w]
+        if w in lexicon_negative: score += lexicon_negative[w]
+    if score > 0:  return score, 'positif'
+    elif score < 0: return score, 'negatif'
+    else:           return score, 'netral'
 
-print('Distribusi label otomatis:')
+results = df_raw['text_filtered'].apply(sentiment_analysis_lexicon)
+results = list(zip(*results))
+df_raw['polarity_score']  = results[0]
+df_raw['label_otomatis']  = results[1]
+
+print('\\nDistribusi label otomatis:')
 print(df_raw['label_otomatis'].value_counts())
+
+# Visualisasi distribusi
+import matplotlib.pyplot as plt
+
+sentiment_counts = df_raw['label_otomatis'].value_counts()
+plt.figure(figsize=(12, 5))
+
+plt.subplot(1, 2, 1)
+sentiment_counts.plot(kind='bar', color=['green','red','gray'][:len(sentiment_counts)])
+plt.title('Distribusi Label Sentimen')
+plt.xlabel('Sentimen'); plt.ylabel('Jumlah')
+plt.xticks(rotation=0)
+
+plt.subplot(1, 2, 2)
+plt.pie(sentiment_counts.values, labels=sentiment_counts.index,
+        autopct='%1.1f%%', startangle=90)
+plt.title('Proporsi Sentimen')
+
+plt.tight_layout(); plt.show()
 
 REVIEW_PATH = f'{DRIVE_DIR}/data/review_label_{ANGGOTA}.xlsx'
 df_raw[['tempat_nama','wilayah','tipe_tempat','teks_asli','teks_bersih',
-        'rating_google','label_otomatis']].to_excel(REVIEW_PATH, index=False)
+        'rating_google','polarity_score','label_otomatis']].to_excel(REVIEW_PATH, index=False)
 print(f'\\n⚠️  Export ke: {REVIEW_PATH}')
 print('Buka file → isi kolom label_final (positif/negatif) → re-upload ke Drive.')
+""")
+
+# ── Cell 6b: WordCloud Eksplorasi Label ──────────────────────────────────
+code("""\
+# ── CELL 6b: WordCloud Eksplorasi per Label ──────────────────────────
+from wordcloud import WordCloud, STOPWORDS
+
+try:
+    ind_stop = set(stopwords.words('indonesian'))
+except: ind_stop = set()
+custom_stop = {'rt','amp','jang','klo','gk','ga','yg','nya','juga','udah',
+               'oke','aja','yang','ok','buka','beli','pake','banget'}
+all_stopwords = STOPWORDS | ind_stop | custom_stop
+
+def join_texts(series):
+    texts = []
+    for v in series.dropna():
+        texts.append(' '.join(v) if isinstance(v, (list,tuple)) else str(v))
+    return ' '.join(texts)
+
+text_all = join_texts(df_raw['teks_bersih'])
+text_pos = join_texts(df_raw.loc[df_raw['label_otomatis']=='positif','teks_bersih'])
+text_neg = join_texts(df_raw.loc[df_raw['label_otomatis']=='negatif','teks_bersih'])
+
+if not text_pos.strip(): text_pos = 'tidak ada'
+if not text_neg.strip(): text_neg = 'tidak ada'
+
+plt.figure(figsize=(18, 6))
+for i, (title, txt) in enumerate([
+        ('All Reviews', text_all),
+        ('Positif', text_pos),
+        ('Negatif', text_neg)]):
+    plt.subplot(1, 3, i+1)
+    wc = WordCloud(background_color='white', width=600, height=600,
+                   stopwords=all_stopwords, max_words=200,
+                   collocations=False).generate(txt)
+    plt.imshow(wc, interpolation='bilinear')
+    plt.axis('off'); plt.title(f'WordCloud - {title}')
+plt.tight_layout(); plt.show()
 """)
 
 # ── Cell 7: Load labeled ──────────────────────────────────────────────────
