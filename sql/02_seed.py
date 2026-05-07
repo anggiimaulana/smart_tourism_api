@@ -236,10 +236,10 @@ async def seed_wisata(session: AsyncSession) -> int:
                     "instagram":    safe_str(row.get("Link_Instagram")),
                     "website":      safe_str(row.get("Link_Website_Resmi")),
                     "kontak":       safe_str(row.get("Kontak_HP")),
-                    "gambar":       [],          # diisi manual oleh admin via dashboard
+                    "gambar":       [],
                     "sumber":       safe_str(row.get("Sumber_Data")),
                     "diinput":      safe_str(row.get("Diinput_Oleh")),
-                    "status":       "draft",
+                    "status":       "aktif",
                 })
             inserted += 1
 
@@ -326,7 +326,7 @@ async def seed_kuliner(session: AsyncSession) -> tuple[int, int]:
                     "kontak":       safe_str(row.get("Kontak")),
                     "gambar":       [],
                     "sumber":       safe_str(row.get("Sumber_Data")),
-                    "status":       "draft",
+                    "status":       "aktif",
                 })
             inserted += 1
 
@@ -410,7 +410,7 @@ async def seed_nongkrong(session: AsyncSession) -> tuple[int, int]:
                     "kontak":    safe_str(row.get("Kontak_HP")),
                     "gambar":    [],
                     "sumber":    safe_str(row.get("Sumber_Data")),
-                    "status":    "draft",
+                    "status":    "aktif",
                 })
             inserted += 1
 
@@ -420,138 +420,214 @@ async def seed_nongkrong(session: AsyncSession) -> tuple[int, int]:
 # ── Seed Admin User ────────────────────────────────────────────────────────────
 
 async def seed_admin(session: AsyncSession):
-    """Insert 1 akun admin default jika belum ada."""
-    exists = await session.execute(
-        text("SELECT 1 FROM users WHERE email = 'admin@smarttourism.id'")
+    """Insert 1 akun admin default jika belum ada (menggunakan bcrypt)."""
+    import bcrypt
+    
+    # 1. Cek apakah admin sudah ada
+    res = await session.execute(
+        text("SELECT password_hash FROM users WHERE email = 'admin@smarttourism.id'")
     )
-    if exists.fetchone():
-        print("  [SKIP] Admin user sudah ada.")
-        return
+    row = res.fetchone()
+    
+    if row:
+        pwd_hash = row.password_hash
+        # Jika hash tidak diawali $2b$ (bukan bcrypt), kita hapus dan buat ulang
+        if not pwd_hash.startswith("$2b$"):
+            print("  [INFO] Hash admin lama terdeteksi (SHA256), mereset ke bcrypt...")
+            await session.execute(text("DELETE FROM users WHERE email = 'admin@smarttourism.id'"))
+            await session.commit()
+        else:
+            print("  [SKIP] Admin user sudah ada dengan hash bcrypt.")
+            return
 
-    # Gunakan bcrypt di production. Di sini hash sederhana untuk seed.
-    # Ganti dengan bcrypt.hashpw() yang sesungguhnya.
-    import hashlib
-    pw_hash = hashlib.sha256(b"admin123").hexdigest()  # GANTI di production!
+    # 2. Buat hash baru menggunakan bcrypt
+    pw_plain = "admin123"
+    salt = bcrypt.gensalt()
+    pw_hash = bcrypt.hashpw(pw_plain.encode("utf-8"), salt).decode("utf-8")
 
     await session.execute(text("""
-        INSERT INTO users (nama, email, password_hash, role)
-        VALUES ('Super Admin', 'admin@smarttourism.id', :pw, 'admin')
+        INSERT INTO users (nama, email, password_hash, role, is_active)
+        VALUES ('Super Admin', 'admin@smarttourism.id', :pw, 'admin', true)
     """), {"pw": pw_hash})
     await session.commit()
     print("  [OK] Admin user dibuat: admin@smarttourism.id / admin123")
+    print("  [OK] Admin user dibuat: admin@smarttourism.id / admin123")
+
 
 # ── Seed Sentiment ────────────────────────────────────────────────────────────
 
 async def seed_sentiment(session: AsyncSession) -> tuple[int, int]:
-    inserted = 0
-    skipped = 0
-    wilayah_list = ["Indramayu", "Cirebon", "Majalengka", "Kuningan"]
-    
-    for w in wilayah_list:
-        file_path = Path(f"data/scrap/hasil_sentimen_{w}.xlsx")
-        
-        # Fallback jika penamaan filenya pakai huruf kecil
-        if not file_path.exists():
-            alt_path = Path(f"data/scrap/hasil_sentimen_{w.lower()}.xlsx")
-            if alt_path.exists():
-                file_path = alt_path
-            else:
-                # Cek jika ada file hasil_sentimen_Anggi.xlsx sebagai fallback sementara
-                anggi_path = Path(f"data/scrap/hasil_sentimen_Anggi.xlsx")
-                if anggi_path.exists() and w == "Cirebon":
-                    file_path = anggi_path
-                else:
-                    print(f"  [SKIP] File sentimen untuk {w} tidak ditemukan di {file_path}")
-                    continue
+    """
+    Seed data sentimen dari data/scrap/result/hasil_sentimen_{Wilayah}.xlsx
+    untuk 4 wilayah: Indramayu, Cirebon, Majalengka, Kuningan.
 
-        print(f"  Memproses file sentimen: {file_path}...")
+    Kolom Excel yang digunakan:
+      tempat_nama    → untuk lookup ke tabel wisata/kuliner/nongkrong
+      wilayah        → untuk filter lookup (agar tidak bentrok nama sama beda wilayah)
+      tipe_tempat    → 'Kuliner'/'Wisata'/'Nongkrong' → dinormalisasi ke lowercase
+      teks_asli      → ulasan_asli (NOT NULL)
+      teks_bersih    → ulasan_bersih
+      sentimen_pred  → sentimen (positif/negatif/netral)
+      confidence_pred→ confidence NUMERIC(5,4)
+
+    model_used = 'indobert' (hasil fine-tuning IndoBERT di Colab).
+    Idempotent — skip baris duplikat berdasarkan (tempat_kode + ulasan_asli).
+    """
+    inserted  = 0
+    skipped   = 0
+    not_found = 0
+
+    WILAYAH = ["Indramayu", "Cirebon", "Majalengka", "Kuningan"]
+
+    for w in WILAYAH:
+        file_path = Path(f"data/scrap/result/hasil_sentimen_{w}.xlsx")
+
+        if not file_path.exists():
+            print(f"  [SKIP] File tidak ditemukan: {file_path}")
+            continue
+
+        print(f"  Memproses: {file_path} ...")
         try:
             df = pd.read_excel(file_path)
         except Exception as e:
             print(f"  [ERROR] Gagal membaca {file_path}: {e}")
             continue
-            
+
+        fi, fs, fn = 0, 0, 0
+
         for _, row in df.iterrows():
-            kode = safe_str(row.get("tempat_kode"))
-            tempat_nama = safe_str(row.get("tempat_nama"))
-            tipe_tempat = safe_str(row.get("tipe_tempat", "wisata")).lower()
             ulasan_asli = safe_str(row.get("teks_asli"))
-            
             if not ulasan_asli:
                 continue
 
-            tempat_id = None
-            
-            table_map = {
-                "wisata": "wisata",
-                "kuliner": "kuliner",
-                "nongkrong": "nongkrong"
-            }
-            table_name = table_map.get(tipe_tempat)
-            
-            if table_name:
-                if kode:
-                    # Cari id berdasarkan kode
-                    query = await session.execute(
-                        text(f"SELECT id, kode FROM {table_name} WHERE kode = :kode LIMIT 1"),
-                        {"kode": kode}
-                    )
-                elif tempat_nama:
-                    # Cari id dan kode berdasarkan nama
-                    query = await session.execute(
-                        text(f"SELECT id, kode FROM {table_name} WHERE nama = :nama LIMIT 1"),
-                        {"nama": tempat_nama}
-                    )
-                else:
-                    query = None
-                    
-                if query:
-                    row_db = query.fetchone()
-                    if row_db:
-                        tempat_id = row_db[0]
-                        kode = row_db[1]
-                        
-            if not tempat_id or not kode:
-                # Skip jika tempat_id tidak ditemukan (karena required oleh constraint)
-                continue
-
-            # Cek duplikat menggunakan ulasan_asli dan tempat_kode
-            exists = await session.execute(
-                text("SELECT 1 FROM sentiment_results WHERE tempat_kode = :kode AND ulasan_asli = :ulasan_asli LIMIT 1"),
-                {"kode": kode, "ulasan_asli": ulasan_asli}
-            )
-            if exists.fetchone():
-                skipped += 1
-                continue
-                
-            sentimen = safe_str(row.get("sentimen_pred"), "netral").lower()
-            confidence = safe_float(row.get("confidence_pred"), 0.0)
+            tempat_nama   = safe_str(row.get("tempat_nama"))
+            wilayah_val   = safe_str(row.get("wilayah", w))
+            tipe_tempat   = safe_str(row.get("tipe_tempat", "wisata")).lower().strip()
             ulasan_bersih = safe_str(row.get("teks_bersih"))
 
+            # Sentimen — hanya nilai valid enum DB: positif / negatif / netral
+            sentimen_raw = safe_str(row.get("sentimen_pred"), "netral").lower().strip()
+            sentimen = sentimen_raw if sentimen_raw in ("positif", "negatif", "netral") else "netral"
+
+            # Confidence — NUMERIC(5,4): range 0.0000 – 0.9999
+            confidence = round(
+                max(0.0, min(0.9999, safe_float(row.get("confidence_pred"), 0.5) or 0.5)),
+                4
+            )
+
+            # Validasi tipe_tempat sesuai enum DB
+            if tipe_tempat not in ("wisata", "kuliner", "nongkrong"):
+                fn += 1
+                continue
+
+            if not tempat_nama:
+                fn += 1
+                continue
+
+            # Lookup tempat_id + kode dari DB menggunakan nama + wilayah
+            q = await session.execute(
+                text(f"""
+                    SELECT id, kode FROM {tipe_tempat}
+                    WHERE LOWER(nama) = LOWER(:nama)
+                      AND wilayah     = :wilayah
+                    LIMIT 1
+                """),
+                {"nama": tempat_nama, "wilayah": wilayah_val},
+            )
+            row_db = q.fetchone()
+            
+            # Fallback 1: Cari di semua tabel jika tipe_tempat salah di Excel
+            if not row_db:
+                q = await session.execute(
+                    text("""
+                        SELECT id, kode, tipe_tempat FROM (
+                            SELECT id, kode, 'wisata' as tipe_tempat, nama, wilayah FROM wisata
+                            UNION ALL
+                            SELECT id, kode, 'kuliner' as tipe_tempat, nama, wilayah FROM kuliner
+                            UNION ALL
+                            SELECT id, kode, 'nongkrong' as tipe_tempat, nama, wilayah FROM nongkrong
+                        ) t
+                        WHERE LOWER(nama) = LOWER(:nama) AND wilayah = :wilayah
+                        LIMIT 1
+                    """),
+                    {"nama": tempat_nama, "wilayah": wilayah_val},
+                )
+                row_db = q.fetchone()
+                if row_db:
+                    tipe_tempat = row_db[2]
+
+            # Fallback 2: Pencarian menggunakan LIKE (mengabaikan sedikit perbedaan nama)
+            if not row_db:
+                q = await session.execute(
+                    text("""
+                        SELECT id, kode, tipe_tempat FROM (
+                            SELECT id, kode, 'wisata' as tipe_tempat, nama, wilayah FROM wisata
+                            UNION ALL
+                            SELECT id, kode, 'kuliner' as tipe_tempat, nama, wilayah FROM kuliner
+                            UNION ALL
+                            SELECT id, kode, 'nongkrong' as tipe_tempat, nama, wilayah FROM nongkrong
+                        ) t
+                        WHERE LOWER(nama) LIKE LOWER(:nama_like) AND wilayah = :wilayah
+                        LIMIT 1
+                    """),
+                    {"nama_like": f"%{tempat_nama}%", "wilayah": wilayah_val},
+                )
+                row_db = q.fetchone()
+                if row_db:
+                    tipe_tempat = row_db[2]
+
+            if not row_db:
+                fn += 1
+                continue
+
+            tempat_id   = row_db[0]
+            tempat_kode = row_db[1]
+
+            # Cek duplikat
+            dup = await session.execute(
+                text("""SELECT 1 FROM sentiment_results
+                        WHERE tempat_kode = :kode
+                          AND ulasan_asli = :ulasan
+                        LIMIT 1"""),
+                {"kode": tempat_kode, "ulasan": ulasan_asli},
+            )
+            if dup.fetchone():
+                fs += 1
+                continue
+
+            # Insert — kolom sesuai skema sentiment_results di 01_schema.sql
             await session.execute(text("""
                 INSERT INTO sentiment_results (
-                    tipe_tempat, tempat_id, tempat_kode, ulasan_asli, ulasan_bersih,
-                    sentimen, confidence, model_used, sumber_scraping, scraped_at
+                    tipe_tempat, tempat_id, tempat_kode,
+                    ulasan_asli, ulasan_bersih,
+                    sentimen, confidence, model_used,
+                    sumber_scraping, scraped_at
                 ) VALUES (
-                    :tipe, :tempat_id, :kode, :asli, :bersih,
-                    :sentimen, :conf, :model, :sumber, :scraped_at
+                    :tipe, :tid, :kode,
+                    :asli, :bersih,
+                    :sentimen, :conf, 'indobert',
+                    'excel_seed', NOW()
                 )
             """), {
-                "tipe": tipe_tempat,
-                "tempat_id": tempat_id,
-                "kode": kode,
-                "asli": ulasan_asli,
-                "bersih": ulasan_bersih,
+                "tipe":     tipe_tempat,
+                "tid":      tempat_id,
+                "kode":     tempat_kode,
+                "asli":     ulasan_asli,
+                "bersih":   ulasan_bersih,
                 "sentimen": sentimen,
-                "conf": confidence,
-                "model": "indobert",
-                "sumber": "excel_seed",
-                "scraped_at": datetime.now()
+                "conf":     confidence,
             })
-            inserted += 1
-            
-    await session.commit()
+            fi += 1
+
+        await session.commit()
+        print(f"    [{w}] Inserted: {fi} | Duplikat: {fs} | Tidak ditemukan di DB: {fn}")
+        inserted  += fi
+        skipped   += fs
+        not_found += fn
+
+    print(f"\n  Total sentimen — Inserted: {inserted} | Duplikat: {skipped} | Tdk ditemukan: {not_found}")
     return inserted, skipped
+
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 
@@ -579,10 +655,10 @@ async def main():
         print("\n[4/5] Seeding nongkrong...")
         ins, skip = await seed_nongkrong(session)
         print(f"  [OK] Inserted: {ins} | Skipped (duplikat): {skip}")
-        
+
         print("\n[5/5] Seeding hasil analisis sentimen...")
         ins, skip = await seed_sentiment(session)
-        print(f"  [OK] Inserted: {ins} | Skipped (duplikat): {skip}")
+        print(f"  [OK] Total inserted: {ins} | Duplikat: {skip}")
 
     print("\n" + "=" * 55)
     print("  Seeding selesai!")

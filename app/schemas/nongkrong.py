@@ -1,5 +1,5 @@
 from typing import List, Optional
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, ConfigDict
 from app.schemas.wisata import WilayahEnum, SentimenEnum, StatusEnum
  
  
@@ -62,5 +62,5 @@ class NongkrongResponse(NongkrongBase):
     total_positif:        int = 0
     total_negatif:        int = 0
  
-    model_config = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
  

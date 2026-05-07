@@ -23,16 +23,18 @@ async def list_wisata(
     kategori: Optional[str]  = Query(None, description="Alam | Buatan | Budaya | Religi | ..."),
     sentimen: Optional[str]  = Query(None, description="positif | negatif | netral"),
     q:        Optional[str]  = Query(None, description="Pencarian nama wisata"),
+    sort_by:  Optional[Literal["rating", "sentimen"]] = Query("rating"),
+    order:    Optional[Literal["asc", "desc"]]        = Query("desc"),
     page:     int            = Query(1, ge=1),
     limit:    int            = Query(10, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Filter tersedia: wilayah, kategori_utama, sentimen, pencarian nama.
-    Urutan default: rating_google DESC, skor_sentimen DESC.
+    Sorting: rating (default), sentimen. Order: desc (default), asc.
     """
     service = WisataService()
-    result = await service.list(wilayah, kategori, sentimen, q, page, limit, db)
+    result = await service.list(wilayah, kategori, sentimen, q, sort_by, order, page, limit, db)
     return BaseResponse(data=result)
 
 

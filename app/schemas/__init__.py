@@ -21,9 +21,6 @@ from app.schemas.recommendation import (
 	TrackHistoryRequest,
 )
 from app.schemas.sentiment import (
-	SentimentBatchRequest,
-	SentimentRequest,
-	SentimentResponse,
 	SentimentSummaryResponse,
 	SentimentSyncResponse,
 )
@@ -51,9 +48,6 @@ __all__ = [
 	"RecommendationRequest",
 	"RecommendationResponse",
 	"RegisterRequest",
-	"SentimentBatchRequest",
-	"SentimentRequest",
-	"SentimentResponse",
 	"SentimentSummaryResponse",
 	"SentimentSyncResponse",
 	"TokenResponse",
