@@ -17,16 +17,18 @@ async def list_nongkrong(
     wilayah:  Optional[Literal["Indramayu","Cirebon","Majalengka","Kuningan"]] = Query(None),
     sentimen: Optional[str]   = Query(None),
     q:        Optional[str]   = Query(None, description="Cari nama atau konsep"),
+    sort_by:  Optional[Literal["rating", "sentimen"]] = Query("rating"),
+    order:    Optional[Literal["asc", "desc"]]        = Query("desc"),
     page:     int             = Query(1, ge=1),
     limit:    int             = Query(10, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Filter tersedia: wilayah, sentimen, pencarian nama/konsep.
-    Diurutkan: rating DESC, skor_sentimen DESC.
+    Filter: wilayah, sentimen, q.
+    Sorting: rating (default), sentimen. Order: desc (default), asc.
     """
     service = NongkrongService()
-    result  = await service.list(wilayah, sentimen, q, page, limit, db)
+    result  = await service.list(wilayah, sentimen, q, sort_by, order, page, limit, db)
     return BaseResponse(data=result)
  
  

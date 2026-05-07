@@ -13,7 +13,7 @@ from app.core.security import create_access_token, hash_password
 from app.models.user import User
  
 # Gunakan database test terpisah (jangan pakai DB development!)
-TEST_DATABASE_URL = "postgresql+asyncpg://postgres:root@localhost:5432/smart_tourism_test"
+TEST_DATABASE_URL = "postgresql+asyncpg://postgres:anggi1307@localhost:5432/smart_tourism_test"
 
 
 @pytest_asyncio.fixture

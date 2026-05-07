@@ -24,9 +24,9 @@ ml/recommendation/*.bin
 ml/chatbot/vector_store/
 
 # ── Dataset (jangan commit) ──────────────────────────────────
-data/*.xlsx
-data/*.csv
-data/*.json
+# data/*.xlsx
+# data/*.csv
+# data/*.json
 
 # ── IDE ──────────────────────────────────────────────────────
 .vscode/

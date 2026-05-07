@@ -25,6 +25,8 @@ class NongkrongService:
         wilayah:  Optional[str],
         sentimen: Optional[str],
         q:        Optional[str],
+        sort_by:  Optional[str],
+        order:    Optional[str],
         page:     int,
         limit:    int,
         db:       AsyncSession,
@@ -48,10 +50,16 @@ class NongkrongService:
         total_r = await db.execute(text(f"SELECT COUNT(*) FROM nongkrong {where}"), params)
         total   = total_r.scalar() or 0
 
+        # ── Sorting ───────────────────────────────────────────────────────────
+        sort_map = {"rating": "rating_google", "sentimen": "skor_sentimen"}
+        col = sort_map.get(sort_by, "rating_google")
+        ord = "ASC" if order == "asc" else "DESC"
+        order_clause = f"ORDER BY {col} {ord} NULLS LAST"
+
         params["limit"] = limit; params["offset"] = offset
         rows = await db.execute(text(f"""
             SELECT * FROM nongkrong {where}
-            ORDER BY rating_google DESC NULLS LAST, skor_sentimen DESC NULLS LAST
+            {order_clause}
             LIMIT :limit OFFSET :offset
         """), params)
 

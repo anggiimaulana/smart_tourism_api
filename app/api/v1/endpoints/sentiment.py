@@ -8,55 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import require_admin
 from app.schemas.base import BaseResponse
-from app.schemas.sentiment import SentimentRequest, SentimentBatchRequest
 from app.services.sentiment_service import SentimentService
 
 router = APIRouter()
-
-
-@router.post(
-    "/predict",
-    response_model=BaseResponse,
-    summary="Prediksi sentimen satu ulasan",
-    description="""
-    Kirim satu teks ulasan, dapatkan label sentimen + confidence score.
-
-    **Model yang tersedia:**
-    - `indobert` — akurasi tertinggi, butuh model hasil training Colab
-    - `naive_bayes`, `svm`, `decision_tree` — baseline, lebih ringan
-
-    Hasil prediksi otomatis disimpan ke tabel `sentiment_results`.
-    """,
-)
-async def predict_sentiment(
-    payload: SentimentRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Error 503 = model file belum tersedia di folder ml/sentiment/.
-    Jalankan training di Colab terlebih dahulu.
-    """
-    service = SentimentService()
-    result = await service.predict_and_save(payload, db)
-    return BaseResponse(data=result)
-
-
-@router.post(
-    "/predict/batch",
-    response_model=BaseResponse,
-    summary="Prediksi sentimen massal (maks. 100 ulasan per request)",
-)
-async def predict_batch(
-    payload: SentimentBatchRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Digunakan untuk memproses hasil scraping massal dari Google Maps.
-    Proses berjalan secara berurutan (sequential), bukan parallel.
-    """
-    service = SentimentService()
-    results = await service.predict_batch(payload.items, db)
-    return BaseResponse(data=results)
 
 
 @router.get(
@@ -75,6 +29,23 @@ async def get_summary(
     service = SentimentService()
     result = await service.get_summary(wilayah, tipe_tempat, db)
     return BaseResponse(data=result)
+
+
+@router.get(
+    "/summary-all",
+    response_model=BaseResponse,
+    summary="Ringkasan sentimen semua wilayah",
+)
+async def get_summary_all(
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Mengembalikan list agregat untuk 4 wilayah (Indramayu, Cirebon, Majalengka, Kuningan).
+    Cocok untuk chart perbandingan antar wilayah.
+    """
+    service = SentimentService()
+    results = await service.get_summary_all(db)
+    return BaseResponse(data=results)
 
 
 @router.post(
@@ -97,3 +68,21 @@ async def sync_sentimen(
     service = SentimentService()
     result  = await service.sync_sentimen(tipe_tempat, kode, db)
     return BaseResponse(message="Sentimen berhasil disinkronisasi", data=result)
+
+
+@router.post(
+    "/sync-all",
+    response_model=BaseResponse,
+    summary="[Admin] Sinkronisasi SEMUA label sentimen",
+    dependencies=[Depends(require_admin)],
+)
+async def sync_all_sentimen(
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Update massal kolom sentimen di semua tabel (wisata, kuliner, nongkrong)
+    berdasarkan data yang ada di `sentiment_results`.
+    """
+    service = SentimentService()
+    result  = await service.sync_all(db)
+    return BaseResponse(message="Semua data berhasil disinkronisasi", data=result)

@@ -1,6 +1,6 @@
 import re
 from typing import Optional
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, field_validator, ConfigDict
  
  
 class RegisterRequest(BaseModel):
@@ -50,4 +50,4 @@ class UserProfileResponse(BaseModel):
     avatar_url: Optional[str] = None
     is_active:  bool
  
-    model_config = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)

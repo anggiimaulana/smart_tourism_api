@@ -1,5 +1,4 @@
-# app/core/config.py
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -24,11 +23,9 @@ class Settings(BaseSettings):
 
     # ── RAG Settings ──────────────────────────────────────────
     RAG_TOP_K:    int   = 5     # jumlah dokumen yang di-retrieve per query
-    RAG_MIN_RANK: float = 0.01  # minimum ts_rank agar dokumen lolos
+    RAG_MIN_SCORE: float = 0.01  # minimum ts_rank agar dokumen lolos
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 
 # Singleton — import ini di semua file yang butuh settings

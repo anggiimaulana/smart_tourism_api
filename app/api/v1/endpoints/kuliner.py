@@ -19,16 +19,18 @@ async def list_kuliner(
     sentimen:  Optional[str]   = Query(None),
     halal:     Optional[bool]  = Query(None),
     q:         Optional[str]   = Query(None, description="Cari nama atau menu"),
+    sort_by:   Optional[Literal["rating", "sentimen"]] = Query("rating"),
+    order:     Optional[Literal["asc", "desc"]]        = Query("desc"),
     page:      int             = Query(1, ge=1),
     limit:     int             = Query(10, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Filter tersedia: wilayah, jenis_tempat, sentimen, sertifikat_halal, pencarian nama.
-    Diurutkan: rating DESC, skor_sentimen DESC.
+    Filter: wilayah, jenis_tempat, sentimen, halal, q.
+    Sorting: rating (default), sentimen. Order: desc (default), asc.
     """
     service = KulinerService()
-    result  = await service.list(wilayah, jenis, sentimen, halal, q, page, limit, db)
+    result  = await service.list(wilayah, jenis, sentimen, halal, q, sort_by, order, page, limit, db)
     return BaseResponse(data=result)
  
  
