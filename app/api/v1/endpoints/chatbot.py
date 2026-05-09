@@ -69,8 +69,6 @@ async def clear_history(session_token: str, db: AsyncSession = Depends(get_db)):
     Mengosongkan array messages di chatbot_sessions.
     Session token tetap valid — percakapan dimulai dari awal.
     """
-    # TODO: implementasi di ChatbotService
-    # service = ChatbotService()
-    # await service.clear_session(session_token, db)
-    # return BaseResponse(message="Riwayat percakapan berhasil dihapus")
-    raise HTTPException(status_code=501, detail="Implementasi di ChatbotService — Vanes")
+    service = ChatbotService()
+    await service.clear_session(session_token, db)
+    return BaseResponse(message="Riwayat percakapan berhasil dihapus")
