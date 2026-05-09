@@ -443,7 +443,8 @@ async def seed_admin(session: AsyncSession):
     # 2. Buat hash baru menggunakan bcrypt
     pw_plain = "admin123"
     salt = bcrypt.gensalt()
-    pw_hash = bcrypt.hashpw(pw_plain.encode("utf-8"), salt).decode("utf-8")
+    # Python bcrypt menghasilkan $2b$, sedangkan PHP/Laravel menggunakan $2y$. Keduanya identik algoritmanya.
+    pw_hash = bcrypt.hashpw(pw_plain.encode("utf-8"), salt).decode("utf-8").replace("$2b$", "$2y$")
 
     await session.execute(text("""
         INSERT INTO users (nama, email, password_hash, role, is_active)
