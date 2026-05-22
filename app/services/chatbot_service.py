@@ -34,18 +34,37 @@ from prompts.chatbot_prompts import (
     format_lokasi,
 )
 
-# Inisialisasi Gemini API (Library: google-generativeai)
+# ── LLM Provider Configuration ─────────────────────────────────────────────────
+# Support: Gemini (default) atau Groq (fallback/alternatif)
+# Set LLM_PROVIDER=groq di .env untuk pakai Groq
+
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").lower()  # "gemini" atau "groq"
+
+# --- Groq Setup ---
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "compound-beta")  # atau "llama-3.3-70b-versatile"
+GROQ_CLIENT = None
+
+if GROQ_API_KEY:
+    try:
+        from groq import Groq
+        GROQ_CLIENT = Groq(api_key=GROQ_API_KEY)
+    except ImportError:
+        print("Warning: groq package not installed. Run: pip install groq")
+
+# --- Gemini Setup ---
 import google.generativeai as genai
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY tidak ditemukan di environment variables!")
+GEMINI_MODEL = None
 
-# Konfigurasi Library
-genai.configure(api_key=GEMINI_API_KEY)
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    GEMINI_MODEL = genai.GenerativeModel("gemini-2.0-flash")
 
-# Gunakan model yang tersedia dan stabil
-GEMINI_MODEL = genai.GenerativeModel("gemini-1.5-flash")
+# Validasi: minimal satu provider harus tersedia
+if not GEMINI_API_KEY and not GROQ_API_KEY:
+    raise ValueError("Minimal satu API key harus diset: GEMINI_API_KEY atau GROQ_API_KEY")
 
 
 class ChatbotService:
@@ -193,7 +212,7 @@ class ChatbotService:
                     "token": new_token,
                     "lat": latitude,
                     "lon": longitude,
-                    "wilayah": wilayah,
+                    "wilayah": wilayah if wilayah in ("Indramayu", "Cirebon", "Majalengka", "Kuningan") else None,
                 },
             )
             await db.commit()
@@ -268,12 +287,36 @@ class ChatbotService:
         """
         import re
         
-        # Clean query
-        query_str = re.sub(r'[^\w\s]', '', user_message).strip()
+        msg_lower = user_message.lower()
         
-        # Jika query kosong (hanya tanya "terdekat"), kita buat query default agar tetap narik data
-        if not query_str or query_str.lower() in ["terdekat", "rekomendasi", "wisata"]:
-            query_str = "wisata"
+        # Deteksi tipe tempat dari pesan user
+        tipe_filter = None
+        if any(k in msg_lower for k in ["nongkrong", "cafe", "kafe", "coffee", "kopi", "ngopi", "hangout"]):
+            tipe_filter = "nongkrong"
+        elif any(k in msg_lower for k in ["kuliner", "makan", "makanan", "restoran", "warung", "masakan", "menu"]):
+            tipe_filter = "kuliner"
+        elif any(k in msg_lower for k in ["wisata", "pantai", "gunung", "air terjun", "taman", "museum", "candi"]):
+            tipe_filter = "wisata"
+
+        # Clean query — hapus stopwords agar FTS lebih efektif
+        stopwords = {
+            "yang", "dan", "di", "ke", "dari", "untuk", "dengan",
+            "pada", "adalah", "atau", "ini", "itu", "jika", "maka",
+            "dimana", "bagaimana", "apa", "tolong", "mohon", "bisakah",
+            "apakah", "sebutkan", "carikan", "cari", "info", "informasi",
+            "rekomendasikan", "rekomendasi", "rekomen", "bagus", "enak",
+            "terbaik", "terdekat", "murah", "seru", "keren", "populer",
+            "ada", "bisa", "mau", "ingin", "saya", "aku", "gue", "gw",
+            "berikan", "kasih", "tempat", "kekinian", "hits",
+        }
+        words = re.sub(r'[^\w\s]', '', user_message).lower().split()
+        filtered_words = [w for w in words if w not in stopwords and len(w) > 2]
+        
+        # Buat query string dengan OR operator untuk FTS
+        if filtered_words:
+            query_str = " | ".join(filtered_words)
+        else:
+            query_str = "wisata | kuliner | nongkrong"
 
         # Tentukan kolom order (default ranking FTS)
         order_clause = "rank DESC"
@@ -289,33 +332,114 @@ class ChatbotService:
                 )) AS distance"""
             order_clause = "distance ASC"
 
-        # 1. Full Text Search (FTS)
+        # Build WHERE clause
+        where_parts = ["fts @@ to_tsquery('indonesian', :query)"]
+        params = {"query": query_str, "limit": top_k}
+        
+        if wilayah_filter:
+            where_parts.append("wilayah ILIKE :wilayah")
+            params["wilayah"] = wilayah_filter
+        if tipe_filter:
+            where_parts.append("tipe = :tipe")
+            params["tipe"] = tipe_filter
+        
+        where_clause = " AND ".join(where_parts)
+
+        # 1. Full Text Search (FTS) — pakai to_tsquery dengan OR
         sql_fts = text(f"""
-            SELECT *, ts_rank(fts, websearch_to_tsquery('indonesian', :query)) as rank
+            SELECT *, ts_rank(fts, to_tsquery('indonesian', :query)) as rank
             {distance_col}
             FROM v_all_tempat
-            WHERE fts @@ websearch_to_tsquery('indonesian', :query)
-            {"AND wilayah ILIKE :wilayah" if wilayah_filter else ""}
+            WHERE {where_clause}
             ORDER BY {order_clause}
             LIMIT :limit
         """)
         
-        params = {"query": query_str, "limit": top_k}
-        if wilayah_filter: params["wilayah"] = wilayah_filter
-        
         result = await db.execute(sql_fts, params)
         docs = result.fetchall()
         
-        # 2. Fallback: Jika FTS sepi, coba ambil data terdekat saja (jika ada koordinat)
-        if not docs and lat is not None and lng is not None:
-            sql_nearby = text(f"""
-                SELECT * {distance_col}
+        # 2. Fallback: FTS tanpa tipe filter jika kosong
+        if not docs and tipe_filter:
+            where_parts_no_tipe = [p for p in where_parts if "tipe" not in p]
+            where_clause_no_tipe = " AND ".join(where_parts_no_tipe)
+            params_no_tipe = {k: v for k, v in params.items() if k != "tipe"}
+            
+            sql_fallback = text(f"""
+                SELECT *, ts_rank(fts, to_tsquery('indonesian', :query)) as rank
+                {distance_col}
                 FROM v_all_tempat
-                {"WHERE wilayah ILIKE :wilayah" if wilayah_filter else ""}
+                WHERE {where_clause_no_tipe}
+                ORDER BY {order_clause}
+                LIMIT :limit
+            """)
+            result = await db.execute(sql_fallback, params_no_tipe)
+            docs = result.fetchall()
+
+        # 3. Fallback: Jika FTS kosong dan ada koordinat, ambil data terdekat
+        if not docs and lat is not None and lng is not None:
+            tipe_clause = f"AND tipe = '{tipe_filter}'" if tipe_filter else ""
+            sql_nearby = text(f"""
+                SELECT *{distance_col}
+                FROM v_all_tempat
+                WHERE wilayah ILIKE :wilayah {tipe_clause}
                 ORDER BY distance ASC
                 LIMIT :limit
             """)
+            params_nearby = {"wilayah": wilayah_filter, "limit": top_k} if wilayah_filter else {"limit": top_k}
+            result = await db.execute(sql_nearby, params_nearby)
+            docs = result.fetchall()
+
+        # 4. Fallback terakhir: ambil data populer di wilayah + tipe
+        if not docs:
+            tipe_clause = f"AND tipe = :tipe" if tipe_filter else ""
+            wilayah_clause = "WHERE wilayah ILIKE :wilayah" if wilayah_filter else "WHERE 1=1"
+            params_pop = {"limit": top_k}
+            if wilayah_filter:
+                params_pop["wilayah"] = wilayah_filter
+            if tipe_filter:
+                params_pop["tipe"] = tipe_filter
+            
+            sql_popular = text(f"""
+                SELECT *
+                FROM v_all_tempat
+                {wilayah_clause} {tipe_clause}
+                ORDER BY rating_google DESC NULLS LAST
+                LIMIT :limit
+            """)
+            result = await db.execute(sql_popular, params_pop)
+            docs = result.fetchall()
+
+        # 5. Distribusi merata antar wilayah jika query multi-wilayah (tanpa filter)
+        if not wilayah_filter and docs and len(docs) > 1:
+            docs = ChatbotService._balance_by_wilayah(docs, top_k)
+
         return docs[:top_k]
+
+    @staticmethod
+    def _balance_by_wilayah(docs: list, top_k: int) -> list:
+        """Distribusi hasil merata antar wilayah agar tidak condong ke 1 daerah."""
+        from collections import defaultdict
+        
+        # Group by wilayah
+        by_wilayah = defaultdict(list)
+        for doc in docs:
+            w = getattr(doc, 'wilayah', None) or 'Unknown'
+            by_wilayah[w].append(doc)
+        
+        # Round-robin: ambil 1 dari tiap wilayah secara bergantian
+        balanced = []
+        wilayah_keys = list(by_wilayah.keys())
+        idx = 0
+        while len(balanced) < top_k and any(by_wilayah.values()):
+            key = wilayah_keys[idx % len(wilayah_keys)]
+            if by_wilayah[key]:
+                balanced.append(by_wilayah[key].pop(0))
+            idx += 1
+            # Safety: jika sudah loop semua dan semua kosong, break
+            if idx > top_k * len(wilayah_keys):
+                break
+        
+        return balanced
 
     @staticmethod
     def _row_to_dict(row) -> dict:
@@ -370,33 +494,77 @@ class ChatbotService:
                 pertanyaan=user_message
             )
 
-    # --- Helper: Async wrapper untuk Gemini API / Mock ---
+    # --- Helper: Async wrapper untuk LLM API (Gemini / Groq) ---
     async def _generate_gemini_response(self, prompt: str, docs: list = None) -> str:
-        """Wrapper async untuk memanggil Gemini API / Mock Fallback"""
+        """Wrapper async untuk memanggil LLM API (Gemini atau Groq) dengan fallback."""
+        
+        import time
+
+        # Tentukan urutan provider berdasarkan konfigurasi
+        if LLM_PROVIDER == "groq" and GROQ_CLIENT:
+            providers = [("groq", self._call_groq), ("gemini", self._call_gemini)]
+        else:
+            providers = [("gemini", self._call_gemini), ("groq", self._call_groq)]
+
+        for provider_name, call_fn in providers:
+            try:
+                result = await asyncio.to_thread(call_fn, prompt)
+                if result:
+                    return result
+            except Exception as e:
+                print(f"Warning: {provider_name} failed: {e}")
+                continue
+
+        # Semua provider gagal → fallback ke mock
+        print("Warning: All LLM providers failed. Using mock response.")
+        return ChatbotService._get_mock_fallback(prompt, docs)
+
+    @staticmethod
+    def _call_gemini(prompt: str) -> str | None:
+        """Call Gemini API dengan retry."""
+        if not GEMINI_MODEL:
+            return None
         
         from google.api_core.exceptions import ResourceExhausted
         import time
+
+        for attempt in range(2):
+            try:
+                response = GEMINI_MODEL.generate_content(prompt)
+                return response.text
+            except ResourceExhausted:
+                if attempt < 1:
+                    wait_time = 2 ** attempt
+                    print(f"Warning: Gemini quota exhausted, retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    print("Warning: Gemini quota exhausted.")
+                    return None
+            except Exception as e:
+                print(f"Error: Gemini error: {e}")
+                return None
+        return None
+
+    @staticmethod
+    def _call_groq(prompt: str) -> str | None:
+        """Call Groq API (OpenAI-compatible)."""
+        if not GROQ_CLIENT:
+            return None
         
-        def _call_gemini():
-            for attempt in range(3):
-                try:
-                    response = GEMINI_MODEL.generate_content(prompt)
-                    return response.text
-                except ResourceExhausted as e:
-                    if attempt < 2:  # Retry max 2x
-                        wait_time = 2 ** attempt  # Exponential backoff: 2s, 4s
-                        print(f"Warning: Quota exhausted, retrying in {wait_time}s...")
-                        time.sleep(wait_time)
-                        continue
-                    else:
-                        print("Warning: Gemini quota exhausted. Using mock response for testing.")
-                        return ChatbotService._get_mock_fallback(prompt, docs)
-                except Exception as e:
-                    print(f"Error: Gemini error: {e}")
-                    # Jika error selain kuota, tetap coba berikan mock daripada error 500
-                    return ChatbotService._get_mock_fallback(prompt, docs)
-        
-        return await asyncio.to_thread(_call_gemini)
+        try:
+            response = GROQ_CLIENT.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=[
+                    {"role": "system", "content": "Kamu adalah SITA, asisten pariwisata Ciayumajakuning. Jawab dalam Bahasa Indonesia dengan ramah dan informatif. Hanya jawab pertanyaan seputar wisata, kuliner, dan tempat nongkrong di wilayah Cirebon, Indramayu, Majalengka, dan Kuningan."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.7,
+                max_tokens=1024,
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"Error: Groq error: {e}")
+            return None
 
     @staticmethod
     def _get_mock_fallback(prompt: str, docs: list = None) -> str:
@@ -422,8 +590,6 @@ class ChatbotService:
         
         # 2. Ambil data dari docs jika ada
         items = []
-        emoji = "🏞️"
-        tipe = "wisata"
 
         # --- 1. DETEKSI OUT-OF-SCOPE & IRRELEVANT (PRIORITAS UTAMA) ---
         out_of_scope_keywords = [
@@ -464,13 +630,9 @@ class ChatbotService:
             main_doc = ChatbotService._row_to_dict(docs[0])
             main_nama = main_doc.get('nama', '').lower()
             
-            # Validasi Relevansi Ketat:
-            # Cari kata unik dari user (yang bukan kata tanya umum)
-            ignored_words = ["dimana", "lokasi", "alamat", "wisata", "pantai", "kuliner", "itu", "ada", "apa", "berapa"]
-            query_words = [w for w in user_part.split() if len(w) > 2 and w not in ignored_words]
-            
-            # Jika user tanya spesifik (misal: "labuhan bajo") tapi nggak ada di nama hasil DB, tolak!
-            is_relevant = any(w in main_nama for w in query_words) if query_words else True
+            # Jika FTS sudah return hasil, data dianggap relevan
+            # FTS PostgreSQL sudah melakukan filtering relevansi
+            is_relevant = True
             
             if not is_relevant:
                 header = f"🔍 **Maaf, SITA belum menemukan data yang pas untuk '{user_part_raw.strip()}' di Ciayumajakuning.**"
@@ -481,6 +643,15 @@ class ChatbotService:
                 main_alamat = main_doc.get('alamat_lengkap', 'wilayah Ciayumajakuning')
                 main_maps = main_doc.get('link_google_maps', '#')
                 main_dist = main_doc.get('distance')
+
+                # Deteksi tipe tempat dari data
+                tipe = main_doc.get('tipe', 'wisata')
+                if tipe == 'kuliner':
+                    emoji = "🍽️"
+                elif tipe == 'nongkrong':
+                    emoji = "☕"
+                else:
+                    emoji = "🏞️"
 
                 if is_asking_nearby:
                     if main_dist is not None:
@@ -537,6 +708,106 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
 
 
     # ========================================================================
+    # Content Safety — Tolak pertanyaan berbahaya / di luar konteks
+    # ========================================================================
+
+    @staticmethod
+    def _check_content_safety(message: str) -> str | None:
+        """
+        Cek apakah pesan mengandung konten berbahaya atau di luar konteks pariwisata.
+        Return pesan penolakan jika terdeteksi, None jika aman.
+        """
+        import re
+        
+        msg_lower = re.sub(r'[^\w\s]', '', message).lower()
+
+        # Konten berbahaya / ilegal — HARUS ditolak
+        dangerous_keywords = [
+            "serangan cyber", "cyber attack", "ddos", "hack", "hacking", "hacker",
+            "exploit", "malware", "ransomware", "virus komputer", "trojan",
+            "phishing", "sql injection", "xss", "brute force",
+            "buat bom", "membuat bom", "racun", "senjata", "narkoba", "drugs",
+            "bunuh", "membunuh", "pembunuhan", "terorisme", "teroris",
+            "pencurian data", "carding", "skimming", "penipuan online",
+            "deepfake", "pornografi", "porno", "judi online", "slot online",
+        ]
+
+        # Topik di luar konteks pariwisata — tolak dengan halus
+        irrelevant_topics = [
+            "politik", "presiden", "pemilu", "partai", "pilkada",
+            "agama", "aliran sesat", "kafir", "halal haram",
+            "tugas sekolah", "tugas kuliah", "kerjakan pr", "jawab soal",
+            "matematika", "fisika", "kimia", "biologi", "rumus",
+            "coding", "programming", "python", "javascript", "java", "kode program",
+            "pinjol", "pinjaman online", "investasi bodong",
+            "jodoh", "pacar", "mantan", "selingkuh",
+            "berita terkini", "gosip artis", "selebriti",
+            "resep masak",  # bukan rekomendasi tempat makan
+            "cara menulis", "cara membuat essay", "cara presentasi",
+            "translate", "terjemahkan",
+        ]
+
+        # Lokasi di luar Ciayumajakuning
+        out_of_scope_locations = [
+            "jakarta", "bandung", "jogja", "yogyakarta", "bali", "lombok",
+            "surabaya", "semarang", "malang", "labuan bajo", "raja ampat",
+            "medan", "makassar", "manado", "singapura", "malaysia", "thailand",
+            "monas", "borobudur", "prambanan", "tanah lot", "kuta",
+            "solo", "semarang", "palembang", "pontianak", "balikpapan",
+        ]
+
+        # Check dangerous content
+        for keyword in dangerous_keywords:
+            if keyword in msg_lower:
+                return (
+                    "🚫 **Maaf, SITA tidak bisa membantu permintaan tersebut.**\n\n"
+                    "SITA adalah asisten pariwisata yang hanya melayani informasi seputar "
+                    "wisata, kuliner, dan tempat nongkrong di Ciayumajakuning. "
+                    "Permintaan yang mengandung konten berbahaya atau ilegal tidak dapat diproses.\n\n"
+                    "💡 Yuk, tanya SITA hal-hal seru seperti:\n"
+                    "- \"Rekomendasi pantai di Indramayu\"\n"
+                    "- \"Cafe kekinian di Cirebon\"\n"
+                    "- \"Wisata alam terbaik di Kuningan\"\n\n"
+                    "Ada yang bisa SITA bantu seputar Ciayumajakuning?"
+                )
+
+        # Check irrelevant topics
+        for keyword in irrelevant_topics:
+            if keyword in msg_lower:
+                return (
+                    "🤖 **Maaf ya, SITA hanya bisa menjawab pertanyaan seputar pariwisata, "
+                    "kuliner, dan tempat nongkrong di Ciayumajakuning.**\n\n"
+                    "Pertanyaan di luar topik tersebut belum bisa SITA jawab. "
+                    "Tapi kalau kamu butuh rekomendasi liburan, SITA siap bantu!\n\n"
+                    "💡 Coba tanya:\n"
+                    "- \"Tempat nongkrong kekinian di Majalengka\"\n"
+                    "- \"Kuliner khas Indramayu yang wajib dicoba\"\n"
+                    "- \"Wisata keluarga di Kuningan\"\n\n"
+                    "Ada yang bisa SITA bantu?"
+                )
+
+        # Check out-of-scope locations (tapi hanya jika TIDAK menyebut Ciayumajakuning)
+        mentions_ciayumajakuning = any(
+            w in msg_lower for w in ["cirebon", "indramayu", "majalengka", "kuningan", "ciayumajakuning"]
+        )
+        if not mentions_ciayumajakuning:
+            for keyword in out_of_scope_locations:
+                if keyword in msg_lower:
+                    return (
+                        "🔍 **Maaf, jangkauan informasi SITA terbatas di wilayah Ciayumajakuning.**\n\n"
+                        "SITA hanya bisa memberikan rekomendasi untuk daerah Cirebon, Indramayu, "
+                        "Majalengka, dan Kuningan. Untuk destinasi di luar wilayah tersebut, "
+                        "SITA belum punya datanya.\n\n"
+                        "💡 Tapi kalau mau explore Ciayumajakuning, SITA punya banyak rekomendasi!\n"
+                        "- \"Wisata alam di Kuningan\"\n"
+                        "- \"Pantai terbaik di Indramayu\"\n"
+                        "- \"Kuliner legendaris Cirebon\"\n\n"
+                        "Mau coba tanya yang mana?"
+                    )
+
+        return None  # Aman, lanjut proses
+
+    # ========================================================================
     # Metode Utama (Menggunakan Subtask 2 & 3)
     # ========================================================================
 
@@ -544,6 +815,35 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
         """
         Method ask yang sudah direfactor menggunakan fungsi Subtask 2 & 3.
         """
+        # 0. Content Safety Check — tolak pertanyaan berbahaya/di luar konteks
+        rejection = self._check_content_safety(payload.message)
+        if rejection:
+            # Tetap simpan ke session tapi jawab dengan penolakan halus
+            session_data = await self.get_or_create_session(
+                session_token=payload.session_token,
+                db=db,
+                latitude=payload.latitude,
+                longitude=payload.longitude,
+                wilayah=self.detect_wilayah_from_text(payload.message) or "Indramayu"
+            )
+            session_token = session_data["session_token"]
+            history = session_data["messages"]
+            
+            messages = list(history)
+            messages.extend([
+                {"role": "user", "content": payload.message, "timestamp": self._timestamp()},
+                {"role": "assistant", "content": rejection, "timestamp": self._timestamp()},
+            ])
+            await self.save_session(token=session_token, messages=messages, wilayah=session_data.get("wilayah_terdeteksi"), db=db)
+            
+            return ChatResponse(
+                session_token=session_token,
+                answer=rejection,
+                wilayah_terdeteksi=session_data.get("wilayah_terdeteksi"),
+                referensi=[],
+                messages_count=len(messages),
+            )
+
         # 1. Deteksi wilayah dari text (Subtask 3)
         wilayah_text = self.detect_wilayah_from_text(payload.message)
         
@@ -552,10 +852,36 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
         if payload.latitude and payload.longitude:
             wilayah_geo = self.nearest_wilayah(payload.latitude, payload.longitude)
         
-        # Prioritaskan wilayah dari text, fallback ke geolokasi, default ke Indramayu
-        wilayah = wilayah_text or wilayah_geo or "Indramayu"
+        # 3. Tentukan wilayah filter untuk query
+        # Jika user sebut "ciayumajakuning" atau tidak sebut wilayah spesifik → None (semua wilayah)
+        msg_lower = payload.message.lower()
+        is_all_region = "ciayumajakuning" in msg_lower or "ciayumajakung" in msg_lower
         
-        # 3. Get or create session (Subtask 3)
+        # Hitung berapa wilayah yang disebut
+        mentioned_wilayah = []
+        for w in ["cirebon", "indramayu", "majalengka", "kuningan"]:
+            if w in msg_lower:
+                mentioned_wilayah.append(w.capitalize())
+        
+        if is_all_region or len(mentioned_wilayah) > 1:
+            # Multi-wilayah atau ciayumajakuning → jangan filter, ambil dari semua
+            wilayah_filter = None
+            wilayah = "Ciayumajakuning"
+        elif len(mentioned_wilayah) == 1:
+            wilayah_filter = mentioned_wilayah[0]
+            wilayah = mentioned_wilayah[0]
+        elif wilayah_text:
+            wilayah_filter = wilayah_text
+            wilayah = wilayah_text
+        elif wilayah_geo:
+            wilayah_filter = wilayah_geo
+            wilayah = wilayah_geo
+        else:
+            # Tidak ada info wilayah sama sekali → ambil semua
+            wilayah_filter = None
+            wilayah = "Ciayumajakuning"
+        
+        # 4. Get or create session (Subtask 3)
         session_data = await self.get_or_create_session(
             session_token=payload.session_token,
             db=db,
@@ -566,13 +892,13 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
         
         session_token = session_data["session_token"]
         history = session_data["messages"]
-        wilayah = wilayah or session_data["wilayah_terdeteksi"]
         
-        # 4. RAG Pipeline (Subtask 2)
+        # 5. RAG Pipeline (Subtask 2)
         docs = await self.retrieve_from_db(
             db=db, 
             user_message=payload.message, 
-            wilayah_filter=wilayah,
+            wilayah_filter=wilayah_filter,
+            top_k=5,
             lat=payload.latitude,
             lng=payload.longitude
         )
@@ -605,10 +931,12 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
         messages.extend([user_message_dict, assistant_message])
         
         # 6. Save session menggunakan fungsi baru (Subtask 3)
+        # wilayah_terdeteksi di DB pakai enum, hanya boleh: Indramayu/Cirebon/Majalengka/Kuningan
+        wilayah_to_save = wilayah if wilayah in ("Indramayu", "Cirebon", "Majalengka", "Kuningan") else None
         await self.save_session(
             token=session_token,
             messages=messages,
-            wilayah=wilayah,
+            wilayah=wilayah_to_save,
             db=db
         )
         

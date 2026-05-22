@@ -47,14 +47,78 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Global Exception Handler ──────────────────────────────────
+# ── Global Exception Handlers ─────────────────────────────────
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Handle semua HTTP errors (401, 403, 404, 405, dll) dengan format konsisten."""
+    messages = {
+        400: "Permintaan tidak valid. Periksa kembali data yang dikirim.",
+        401: "Autentikasi diperlukan. Silakan login terlebih dahulu.",
+        403: "Akses ditolak. Anda tidak memiliki izin untuk mengakses resource ini.",
+        404: "Resource tidak ditemukan. Periksa kembali URL atau ID yang diminta.",
+        405: "Method HTTP tidak diizinkan untuk endpoint ini.",
+        409: "Konflik data. Resource sudah ada atau sedang digunakan.",
+        429: "Terlalu banyak permintaan. Silakan coba beberapa saat lagi.",
+    }
+    message = messages.get(exc.status_code, exc.detail or "Terjadi kesalahan.")
+    # Jika exc.detail berisi pesan custom dari raise HTTPException, gunakan itu
+    if exc.detail and exc.detail != "Not Found":
+        message = exc.detail
+
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "message": message,
+            "data": None,
+        },
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle 422 Validation Error — format yang mudah dimengerti."""
+    errors = []
+    for error in exc.errors():
+        field = " → ".join(str(loc) for loc in error.get("loc", []) if loc != "body")
+        msg = error.get("msg", "")
+        errors.append(f"{field}: {msg}" if field else msg)
+
+    return JSONResponse(
+        status_code=422,
+        content={
+            "success": False,
+            "message": "Data yang dikirim tidak valid. Periksa kembali format request.",
+            "errors": errors,
+            "data": None,
+        },
+    )
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    """Handle 500 Internal Server Error — jangan expose detail di production."""
+    error_msg = (
+        f"Terjadi kesalahan internal: {type(exc).__name__}"
+        if settings.DEBUG
+        else "Terjadi kesalahan pada server. Silakan coba beberapa saat lagi."
+    )
+    # Log error untuk debugging
+    import traceback
+    print(f"[ERROR 500] {request.method} {request.url}")
+    print(f"  {type(exc).__name__}: {exc}")
+    if settings.DEBUG:
+        traceback.print_exc()
+
     return JSONResponse(
         status_code=500,
         content={
             "success": False,
-            "message": str(exc) if settings.DEBUG else "Internal server error",
+            "message": error_msg,
             "data": None,
         },
     )

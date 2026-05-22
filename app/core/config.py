@@ -13,7 +13,16 @@ class Settings(BaseSettings):
 
     # ── Gemini ────────────────────────────────────────────────
     # Dapatkan di: https://aistudio.google.com/app/apikey
-    GEMINI_API_KEY: str
+    GEMINI_API_KEY: str = ""
+
+    # ── LLM Provider ─────────────────────────────────────────
+    # Pilih: "gemini" atau "groq"
+    LLM_PROVIDER: str = "gemini"
+
+    # ── Groq ──────────────────────────────────────────────────
+    # Dapatkan di: https://console.groq.com/keys
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL:   str = "compound-beta"
 
     # ── JWT Auth ──────────────────────────────────────────────
     # Generate: python -c "import secrets; print(secrets.token_hex(32))"
