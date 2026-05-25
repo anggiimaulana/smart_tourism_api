@@ -35,7 +35,7 @@ from prompts.chatbot_prompts import (
     format_lokasi,
 )
 
-# ── LLM Provider Configuration ─────────────────────────────────────────────────
+#  LLM Provider Configuration 
 # Support: Gemini (default) atau Groq (fallback/alternatif)
 # Set LLM_PROVIDER=groq di .env untuk pakai Groq
 
@@ -120,7 +120,7 @@ class ChatbotService:
         return None, None
 
     # ========================================================================
-    # SUBTASK 3 — Geolokasi & Session Functions
+    # SUBTASK 3  Geolokasi & Session Functions
     # ========================================================================
 
     @staticmethod
@@ -153,7 +153,7 @@ class ChatbotService:
     @staticmethod
     def nearest_wilayah(latitude: float, longitude: float) -> str | None:
         """
-        Subtask 3: Hitung haversine ke 4 pusat wilayah → return terdekat.
+        Subtask 3: Hitung haversine ke 4 pusat wilayah  return terdekat.
         
         Koordinat pusat kota (approximate):
         - Cirebon: -6.7063, 108.5571
@@ -311,7 +311,7 @@ class ChatbotService:
         await db.commit()
 
     # ========================================================================
-    # SUBTASK 2 — RAG Pipeline Functions
+    # SUBTASK 2  RAG Pipeline Functions
     # ========================================================================
 
     @staticmethod
@@ -358,7 +358,7 @@ class ChatbotService:
         elif any(k in msg_lower for k in ["wisata", "pantai", "gunung", "air terjun", "taman", "museum", "candi"]):
             tipe_filter = "wisata"
 
-        # Clean query — hapus stopwords agar FTS lebih efektif
+        # Clean query  hapus stopwords agar FTS lebih efektif
         stopwords = {
             "yang", "dan", "di", "ke", "dari", "untuk", "dengan",
             "pada", "adalah", "atau", "ini", "itu", "jika", "maka",
@@ -411,7 +411,7 @@ class ChatbotService:
         
         where_clause = " AND ".join(where_parts)
 
-        # 1. Full Text Search (FTS) — pakai to_tsquery dengan OR
+        # 1. Full Text Search (FTS)  pakai to_tsquery dengan OR
         sql_fts = text(f"""
             SELECT *, ts_rank(fts, to_tsquery('indonesian', :query)) as rank
             {distance_col}
@@ -558,9 +558,9 @@ class ChatbotService:
         
         riwayat_text = "-"
         if history:
-            recent = history[-2:]  # ✅ Optimasi: dikurangi dari 3 ke 2
+            recent = history[-2:]  #  Optimasi: dikurangi dari 3 ke 2
             riwayat_text = "\n".join([
-                f"User: {h['content']}\nSITA: {h.get('content', '')}" 
+                f"User: {h['content']}\nCITRA: {h.get('content', '')}" 
                 for h in recent
             ])
         
@@ -584,13 +584,13 @@ class ChatbotService:
         target = wilayah if wilayah in cls.WILAYAH_LIST else "Ciayumajakuning"
         if target in cls.WILAYAH_LIST:
             return (
-                "\n\n**Coba tanya SITA hal lain seperti:**\n"
+                "\n\n**Coba tanya CITRA hal lain seperti:**\n"
                 f"- \"Rekomendasi wisata alam di {target}\"\n"
                 f"- \"Kuliner khas {target} yang enak\"\n"
                 f"- \"Tempat nongkrong yang nyaman di {target}\""
             )
         return (
-            "\n\n**Coba tanya SITA hal lain seperti:**\n"
+            "\n\n**Coba tanya CITRA hal lain seperti:**\n"
             "- \"Rekomendasi wisata alam di Indramayu\"\n"
             "- \"Kuliner legendaris Cirebon\"\n"
             "- \"Tempat nongkrong nyaman di Kuningan\""
@@ -612,12 +612,12 @@ class ChatbotService:
                 high = f"Rp{budget_max:,}" if budget_max is not None else "bebas"
                 budget_text = f" untuk rentang budget {low} - {high}"
             return (
-                f"Maaf, SITA belum menemukan data yang cocok{budget_text}. "
+                f"Maaf, CITRA belum menemukan data yang cocok{budget_text}. "
                 "Silakan coba ubah kata kunci, wilayah, atau rentang budget."
             )
 
         scope = wilayah if wilayah in cls.WILAYAH_LIST else "Ciayumajakuning"
-        lines = [f"🏞️ Berikut rekomendasi wisata di **{scope}** dari data yang tersedia:"]
+        lines = [f" Berikut rekomendasi wisata di **{scope}** dari data yang tersedia:"]
 
         for i, doc in enumerate(docs[:3], 1):
             d = cls._row_to_dict(doc)
@@ -639,7 +639,7 @@ class ChatbotService:
 
         lines.append("\nSemua rekomendasi di atas diambil dari data database Smart Tourism.")
         lines.append(cls._build_relevant_followup_suggestions(wilayah))
-        lines.append("\nAda lagi yang bisa SITA bantu?")
+        lines.append("\nAda lagi yang bisa CITRA bantu?")
         return "\n".join(lines)
 
     @classmethod
@@ -688,7 +688,7 @@ class ChatbotService:
                 print(f"Warning: {provider_name} failed: {e}")
                 continue
 
-        # Semua provider gagal → fallback ke mock
+        # Semua provider gagal  fallback ke mock
         print("Warning: All LLM providers failed. Using mock response.")
         return ChatbotService._get_mock_fallback(prompt, docs)
 
@@ -728,7 +728,7 @@ class ChatbotService:
             response = GROQ_CLIENT.chat.completions.create(
                 model=GROQ_MODEL,
                 messages=[
-                    {"role": "system", "content": "Kamu adalah SITA, asisten pariwisata Ciayumajakuning. Jawab dalam Bahasa Indonesia dengan ramah dan informatif. Hanya jawab pertanyaan seputar wisata, kuliner, dan tempat nongkrong di wilayah Cirebon, Indramayu, Majalengka, dan Kuningan."},
+                    {"role": "system", "content": "Kamu adalah CITRA, asisten pariwisata Ciayumajakuning. Jawab dalam Bahasa Indonesia dengan ramah dan informatif. Hanya jawab pertanyaan seputar wisata, kuliner, dan tempat nongkrong di wilayah Cirebon, Indramayu, Majalengka, dan Kuningan."},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.7,
@@ -753,7 +753,7 @@ class ChatbotService:
             return text.lower().strip()[:500]
 
         # Ambil bagian PERTANYAAN USER saja dari prompt agar tidak rancu dengan SYSTEM_PROMPT
-        user_part_raw = prompt.split("PERTANYAAN USER:")[-1].split("JAWABAN SITA:")[0] if "PERTANYAAN USER:" in prompt else prompt
+        user_part_raw = prompt.split("PERTANYAAN USER:")[-1].split("JAWABAN CITRA:")[0] if "PERTANYAAN USER:" in prompt else prompt
         user_part = sanitize(user_part_raw)
 
         # 1. Deteksi wilayah
@@ -781,14 +781,14 @@ class ChatbotService:
         is_irrelevant = any(k in user_part for k in irrelevant_topics)
 
         if is_out_of_scope:
-            return f"🔍 **Maaf ya, jangkauan informasi SITA saat ini terbatas di wilayah Ciayumajakuning saja.**\n\nSITA belum bisa memberikan informasi untuk tempat di luar Cirebon, Indramayu, Majalengka, dan Kuningan. Silakan tanya SITA tentang destinasi di wilayah tersebut ya!"
+            return f" **Maaf ya, jangkauan informasi CITRA saat ini terbatas di wilayah Ciayumajakuning saja.**\n\nCITRA belum bisa memberikan informasi untuk tempat di luar Cirebon, Indramayu, Majalengka, dan Kuningan. Silakan tanya CITRA tentang destinasi di wilayah tersebut ya!"
         
         if is_irrelevant:
-            return f"🤖 **Maaf banget! SITA hanya bisa menjawab pertanyaan seputar pariwisata, kuliner, dan tempat nongkrong.**\n\nSITA tidak dilatih untuk menjawab topik di luar Ciayumajakuning atau topik umum lainnya. Yuk, tanya SITA tentang rekomendasi liburan saja!"
+            return f" **Maaf banget! CITRA hanya bisa menjawab pertanyaan seputar pariwisata, kuliner, dan tempat nongkrong.**\n\nCITRA tidak dilatih untuk menjawab topik di luar Ciayumajakuning atau topik umum lainnya. Yuk, tanya CITRA tentang rekomendasi liburan saja!"
 
         # --- 2. DETEKSI IDENTITAS & SAPAAN ---
         if any(k in user_part for k in ["siapa kamu", "nama kamu", "siapa dirimu", "apa itu sita", "kamu siapa"]):
-            return "Halo! Saya **SITA** (Smart Informasi Turisme Asisten), asisten virtual pariwisata Ciayumajakuning. Saya bisa bantu kamu cari info wisata, kuliner, atau tempat nongkrong keren!"
+            return "Halo! Saya **CITRA** (Smart Informasi Turisme Asisten), asisten virtual pariwisata Ciayumajakuning. Saya bisa bantu kamu cari info wisata, kuliner, atau tempat nongkrong keren!"
         
         # C. Cek Intent Lokasi/Alamat/Terdekat
         is_asking_location = any(k in user_part for k in ["dimana", "lokasi", "alamat", "rute", "posisi", "daerah mana"])
@@ -796,7 +796,7 @@ class ChatbotService:
         is_asking_price = any(k in user_part for k in ["harga", "biaya", "tiket", "bayar"])
 
         if any(k in user_part for k in ["halo", "hai", "pagi", "siang", "sore", "malam"]):
-            return f"Halo! Ada yang bisa SITA bantu di {wilayah}? Saya punya banyak info tempat wisata, kuliner, dan cafe lokal lho."
+            return f"Halo! Ada yang bisa CITRA bantu di {wilayah}? Saya punya banyak info tempat wisata, kuliner, dan cafe lokal lho."
 
         elif docs:
             # Ambil data utama
@@ -808,8 +808,8 @@ class ChatbotService:
             is_relevant = True
             
             if not is_relevant:
-                header = f"🔍 **Maaf, SITA belum menemukan data yang pas untuk '{user_part_raw.strip()}' di Ciayumajakuning.**"
-                items_text = "Mungkin tempat yang kamu cari berada di luar jangkauan SITA atau ada kesalahan pengetikan nama tempat."
+                header = f" **Maaf, CITRA belum menemukan data yang pas untuk '{user_part_raw.strip()}' di Ciayumajakuning.**"
+                items_text = "Mungkin tempat yang kamu cari berada di luar jangkauan CITRA atau ada kesalahan pengetikan nama tempat."
             else:
                 # Proses Jawaban (Sudah tervalidasi relevan atau intent 'terdekat')
                 main_nama_fix = main_doc.get('nama', 'Tempat tersebut')
@@ -820,22 +820,22 @@ class ChatbotService:
                 # Deteksi tipe tempat dari data
                 tipe = main_doc.get('tipe', 'wisata')
                 if tipe == 'kuliner':
-                    emoji = "🍽️"
+                    emoji = ""
                 elif tipe == 'nongkrong':
-                    emoji = "☕"
+                    emoji = ""
                 else:
-                    emoji = "🏞️"
+                    emoji = ""
 
                 if is_asking_nearby:
                     if main_dist is not None:
                         if main_dist <= 10:
-                            header = f"📍 Wah, ada yang deket banget nih! **{main_nama_fix}** cuma sekitar {main_dist:.1f} km dari lokasimu."
+                            header = f" Wah, ada yang deket banget nih! **{main_nama_fix}** cuma sekitar {main_dist:.1f} km dari lokasimu."
                         elif main_dist <= 30:
-                            header = f"🚗 **{main_nama_fix}** adalah yang paling terdekat dari posisimu saat ini (sekitar {main_dist:.1f} km)."
+                            header = f" **{main_nama_fix}** adalah yang paling terdekat dari posisimu saat ini (sekitar {main_dist:.1f} km)."
                         else:
-                            header = f"🔍 Tempat terdekat yang SITA temukan adalah **{main_nama_fix}**, jaraknya sekitar {main_dist:.1f} km. Masih oke buat dikunjungi!"
+                            header = f" Tempat terdekat yang CITRA temukan adalah **{main_nama_fix}**, jaraknya sekitar {main_dist:.1f} km. Masih oke buat dikunjungi!"
                     else:
-                        header = f"📍 SITA rekomendasikan **{main_nama_fix}** sebagai destinasi terdekat yang populer di {wilayah}."
+                        header = f" CITRA rekomendasikan **{main_nama_fix}** sebagai destinasi terdekat yang populer di {wilayah}."
                     
                     items.append(f"Cek rutenya di sini: {main_maps}")
                     if len(docs) > 1:
@@ -847,13 +847,13 @@ class ChatbotService:
                             items.append(f"- {d_extra.get('nama')}{dist_str} (Maps: {d_extra.get('link_google_maps')})")
 
                 elif is_asking_location:
-                    header = f"📍 Tentu! Untuk **{main_nama_fix}**, lokasinya berada di {main_alamat}."
+                    header = f" Tentu! Untuk **{main_nama_fix}**, lokasinya berada di {main_alamat}."
                     items.append(f"Klik di sini untuk rute Maps: {main_maps}")
                 elif is_asking_price:
                     h_min = main_doc.get('harga_min', 0)
                     h_max = main_doc.get('harga_max', 0)
                     harga_str = f"Rp{h_min:,} - Rp{h_max:,}" if h_min != h_max else (f"Sekitar Rp{h_min:,}" if h_min > 0 else "Gratis")
-                    header = f"💰 Untuk estimasi biaya di **{main_nama_fix}**, siapkan sekitar {harga_str} per orang."
+                    header = f" Untuk estimasi biaya di **{main_nama_fix}**, siapkan sekitar {harga_str} per orang."
                     items.append(f"Maps: {main_maps}")
                 else:
                     header = f"{emoji} Halo! Berikut rekomendasi {tipe} di **{wilayah}** yang mungkin kamu suka:"
@@ -863,7 +863,7 @@ class ChatbotService:
                 
                 items_text = "\n".join([f"{item}" if item.startswith("-") or item.startswith("\n") else f"{i+1}. {item}" for i, item in enumerate(items)])
         else:
-            header = f"🔍 **Maaf, SITA belum menemukan data yang cocok.**"
+            header = f" **Maaf, CITRA belum menemukan data yang cocok.**"
             items_text = "Pastikan tempat yang kamu cari berada di wilayah Cirebon, Indramayu, Majalengka, atau Kuningan."
 
         # Tambahkan Contoh Pertanyaan Relevan di akhir (sesuai wilayah aktif)
@@ -873,15 +873,15 @@ class ChatbotService:
 
 {items_text}
 
-💡 *Tips*: Sebaiknya cek jam operasional atau cuaca sebelum berangkat ke lokasi.
+ *Tips*: Sebaiknya cek jam operasional atau cuaca sebelum berangkat ke lokasi.
 
 {suggestions}
 
-Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
+Ada lagi yang bisa CITRA bantu seputar Ciayumajakuning?"""
 
 
     # ========================================================================
-    # Content Safety — Tolak pertanyaan berbahaya / di luar konteks
+    # Content Safety  Tolak pertanyaan berbahaya / di luar konteks
     # ========================================================================
 
     @staticmethod
@@ -894,7 +894,7 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
         
         msg_lower = re.sub(r'[^\w\s]', '', message).lower()
 
-        # Konten berbahaya / ilegal — HARUS ditolak
+        # Konten berbahaya / ilegal  HARUS ditolak
         dangerous_keywords = [
             "serangan cyber", "cyber attack", "ddos", "hack", "hacking", "hacker",
             "exploit", "malware", "ransomware", "virus komputer", "trojan",
@@ -905,7 +905,7 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
             "deepfake", "pornografi", "porno", "judi online", "slot online",
         ]
 
-        # Topik di luar konteks pariwisata — tolak dengan halus
+        # Topik di luar konteks pariwisata  tolak dengan halus
         irrelevant_topics = [
             "politik", "presiden", "pemilu", "partai", "pilkada",
             "agama", "aliran sesat", "kafir", "halal haram",
@@ -933,30 +933,30 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
         for keyword in dangerous_keywords:
             if keyword in msg_lower:
                 return (
-                    "🚫 **Maaf, SITA tidak bisa membantu permintaan tersebut.**\n\n"
-                    "SITA adalah asisten pariwisata yang hanya melayani informasi seputar "
+                    " **Maaf, CITRA tidak bisa membantu permintaan tersebut.**\n\n"
+                    "CITRA adalah asisten pariwisata yang hanya melayani informasi seputar "
                     "wisata, kuliner, dan tempat nongkrong di Ciayumajakuning. "
                     "Permintaan yang mengandung konten berbahaya atau ilegal tidak dapat diproses.\n\n"
-                    "💡 Yuk, tanya SITA hal-hal seru seperti:\n"
+                    " Yuk, tanya CITRA hal-hal seru seperti:\n"
                     "- \"Rekomendasi pantai di Indramayu\"\n"
                     "- \"Cafe kekinian di Cirebon\"\n"
                     "- \"Wisata alam terbaik di Kuningan\"\n\n"
-                    "Ada yang bisa SITA bantu seputar Ciayumajakuning?"
+                    "Ada yang bisa CITRA bantu seputar Ciayumajakuning?"
                 )
 
         # Check irrelevant topics
         for keyword in irrelevant_topics:
             if keyword in msg_lower:
                 return (
-                    "🤖 **Maaf ya, SITA hanya bisa menjawab pertanyaan seputar pariwisata, "
+                    " **Maaf ya, CITRA hanya bisa menjawab pertanyaan seputar pariwisata, "
                     "kuliner, dan tempat nongkrong di Ciayumajakuning.**\n\n"
-                    "Pertanyaan di luar topik tersebut belum bisa SITA jawab. "
-                    "Tapi kalau kamu butuh rekomendasi liburan, SITA siap bantu!\n\n"
-                    "💡 Coba tanya:\n"
+                    "Pertanyaan di luar topik tersebut belum bisa CITRA jawab. "
+                    "Tapi kalau kamu butuh rekomendasi liburan, CITRA siap bantu!\n\n"
+                    " Coba tanya:\n"
                     "- \"Tempat nongkrong kekinian di Majalengka\"\n"
                     "- \"Kuliner khas Indramayu yang wajib dicoba\"\n"
                     "- \"Wisata keluarga di Kuningan\"\n\n"
-                    "Ada yang bisa SITA bantu?"
+                    "Ada yang bisa CITRA bantu?"
                 )
 
         # Check out-of-scope locations (tapi hanya jika TIDAK menyebut Ciayumajakuning)
@@ -967,11 +967,11 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
             for keyword in out_of_scope_locations:
                 if keyword in msg_lower:
                     return (
-                        "🔍 **Maaf, jangkauan informasi SITA terbatas di wilayah Ciayumajakuning.**\n\n"
-                        "SITA hanya bisa memberikan rekomendasi untuk daerah Cirebon, Indramayu, "
+                        " **Maaf, jangkauan informasi CITRA terbatas di wilayah Ciayumajakuning.**\n\n"
+                        "CITRA hanya bisa memberikan rekomendasi untuk daerah Cirebon, Indramayu, "
                         "Majalengka, dan Kuningan. Untuk destinasi di luar wilayah tersebut, "
-                        "SITA belum punya datanya.\n\n"
-                        "💡 Tapi kalau mau explore Ciayumajakuning, SITA punya banyak rekomendasi!\n"
+                        "CITRA belum punya datanya.\n\n"
+                        " Tapi kalau mau explore Ciayumajakuning, CITRA punya banyak rekomendasi!\n"
                         "- \"Wisata alam di Kuningan\"\n"
                         "- \"Pantai terbaik di Indramayu\"\n"
                         "- \"Kuliner legendaris Cirebon\"\n\n"
@@ -988,7 +988,7 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
         """
         Method ask yang sudah direfactor menggunakan fungsi Subtask 2 & 3.
         """
-        # 0. Content Safety Check — tolak pertanyaan berbahaya/di luar konteks
+        # 0. Content Safety Check  tolak pertanyaan berbahaya/di luar konteks
         rejection = self._check_content_safety(payload.message)
         if rejection:
             # Tetap simpan ke session tapi jawab dengan penolakan halus
@@ -1027,7 +1027,7 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
             wilayah_geo = self.nearest_wilayah(payload.latitude, payload.longitude)
         
         # 3. Tentukan wilayah filter untuk query
-        # Jika user sebut "ciayumajakuning" atau tidak sebut wilayah spesifik → None (semua wilayah)
+        # Jika user sebut "ciayumajakuning" atau tidak sebut wilayah spesifik  None (semua wilayah)
         msg_lower = payload.message.lower()
         is_all_region = "ciayumajakuning" in msg_lower or "ciayumajakung" in msg_lower
         
@@ -1038,7 +1038,7 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
                 mentioned_wilayah.append(w.capitalize())
         
         if is_all_region or len(mentioned_wilayah) > 1:
-            # Multi-wilayah atau ciayumajakuning → jangan filter, ambil dari semua
+            # Multi-wilayah atau ciayumajakuning  jangan filter, ambil dari semua
             wilayah_filter = None
             wilayah = "Ciayumajakuning"
         elif len(mentioned_wilayah) == 1:
@@ -1051,7 +1051,7 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
             wilayah_filter = wilayah_geo
             wilayah = wilayah_geo
         else:
-            # Tidak ada info wilayah sama sekali → ambil semua
+            # Tidak ada info wilayah sama sekali  ambil semua
             wilayah_filter = None
             wilayah = "Ciayumajakuning"
         

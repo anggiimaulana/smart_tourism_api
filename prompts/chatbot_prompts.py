@@ -1,16 +1,16 @@
 # ============================================================
-#  PROMPT ENGINEERING TEMPLATES — Smart Tourism Chatbot RAG
+#  PROMPT ENGINEERING TEMPLATES  Smart Tourism Chatbot RAG
 #  File: prompts/chatbot_prompts.py
 #  Gunakan file ini sebagai referensi saat develop chatbot_service.py
 # ============================================================
 
-# ────────────────────────────────────────────────────────────
+# 
 # 1. SYSTEM PROMPT UTAMA
 #    Mendefinisikan persona, batasan, dan perilaku chatbot
-# ────────────────────────────────────────────────────────────
+# 
 
 SYSTEM_PROMPT = """
-Kamu adalah SITA (Smart Informasi Turisme Asisten), asisten pariwisata virtual resmi \
+Kamu adalah CITRA (Smart Informasi Turisme Asisten), asisten pariwisata virtual resmi \
 untuk wilayah Ciayumajakuning (Cirebon, Indramayu, Majalengka, Kuningan), Jawa Barat.
 
 PERSONA:
@@ -19,18 +19,18 @@ PERSONA:
 - Bangga memperkenalkan keindahan dan kuliner Ciayumajakuning
 
 KEMAMPUAN:
-✓ Merekomendasikan tempat wisata, kuliner, dan nongkrong di Ciayumajakuning
-✓ Memberikan informasi jam buka, harga tiket, dan fasilitas
-✓ Menyarankan rute atau urutan kunjungan
-✓ Menjawab pertanyaan berbasis lokasi user (jika izin lokasi diberikan)
-✓ Memberikan tips perjalanan dan info transportasi
+ Merekomendasikan tempat wisata, kuliner, dan nongkrong di Ciayumajakuning
+ Memberikan informasi jam buka, harga tiket, dan fasilitas
+ Menyarankan rute atau urutan kunjungan
+ Menjawab pertanyaan berbasis lokasi user (jika izin lokasi diberikan)
+ Memberikan tips perjalanan dan info transportasi
 
 BATASAN (WAJIB DIIKUTI):
-✗ Hanya jawab berdasarkan data konteks yang diberikan
-✗ Jangan mengarang informasi yang tidak ada di konteks
-✗ Jika informasi tidak tersedia, katakan jujur: "Maaf, saya belum memiliki info tersebut."
-✗ Jangan menjawab pertanyaan di luar topik wisata/kuliner/nongkrong Ciayumajakuning
-✗ Jangan memberikan informasi harga yang tidak ada di data
+ Hanya jawab berdasarkan data konteks yang diberikan
+ Jangan mengarang informasi yang tidak ada di konteks
+ Jika informasi tidak tersedia, katakan jujur: "Maaf, saya belum memiliki info tersebut."
+ Jangan menjawab pertanyaan di luar topik wisata/kuliner/nongkrong Ciayumajakuning
+ Jangan memberikan informasi harga yang tidak ada di data
 
 FORMAT JAWABAN:
 - Gunakan poin-poin (bullet) jika merekomendasikan lebih dari 1 tempat
@@ -40,65 +40,65 @@ FORMAT JAWABAN:
 """.strip()
 
 
-# ────────────────────────────────────────────────────────────
+# 
 # 2. TEMPLATE PROMPT UTAMA (diisi dinamis saat runtime)
-# ────────────────────────────────────────────────────────────
+# 
 
 MAIN_PROMPT_TEMPLATE = """
 {system_prompt}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 KONTEKS LOKASI USER:
 {lokasi_info}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 DATA TEMPAT DARI DATABASE:
 {konteks_db}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 RIWAYAT PERCAKAPAN:
 {riwayat}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 PERTANYAAN USER:
 {pertanyaan}
 
-JAWABAN SITA:
+JAWABAN CITRA:
 """.strip()
 
 
-# ────────────────────────────────────────────────────────────
+# 
 # 3. TEMPLATE KONTEKS PER DOKUMEN
 #    Diisi oleh build_context() dari hasil retrieval DB
-# ────────────────────────────────────────────────────────────
+# 
 
 DOC_TEMPLATE = """
-[{nomor}] {nama} ({tipe_upper}) ⭐ {rating}
-  📍 {kecamatan}, {wilayah}
-  🗺️  {alamat}
-  ℹ️  {deskripsi}
-  💰 {harga}
-  🕒 {jam}
-  🏷️  Fasilitas: {fasilitas}
-  💬 Sentimen ulasan: {sentimen}
-  🔗 Maps: {maps_link}
+[{nomor}] {nama} ({tipe_upper})  {rating}
+   {kecamatan}, {wilayah}
+    {alamat}
+    {deskripsi}
+   {harga}
+   {jam}
+    Fasilitas: {fasilitas}
+   Sentimen ulasan: {sentimen}
+   Maps: {maps_link}
 """.strip()
 
 
 def format_doc(doc: dict, nomor: int) -> str:
     """Format satu dokumen hasil retrieval ke string konteks."""
     harga = "Gratis" if doc.get("harga_min", 0) == 0 and doc.get("harga_max", 0) == 0 \
-            else f"Rp{doc.get('harga_min',0):,} – Rp{doc.get('harga_max',0):,}"
+            else f"Rp{doc.get('harga_min',0):,}  Rp{doc.get('harga_max',0):,}"
 
-    jam = f"{doc.get('jam_buka','?')} – {doc.get('jam_tutup','?')}" \
+    jam = f"{doc.get('jam_buka','?')}  {doc.get('jam_tutup','?')}" \
           if doc.get("jam_buka") else "Tidak diketahui"
 
     fasilitas_list = doc.get("fasilitas") or []
     fasilitas = ", ".join(fasilitas_list[:5]) if fasilitas_list else "Tidak ada info"
 
     sentimen_label = {
-        "positif": "👍 Mayoritas positif",
-        "negatif": "👎 Ada keluhan",
+        "positif": " Mayoritas positif",
+        "negatif": " Ada keluhan",
         None:      "Belum dianalisis",
     }.get(doc.get("sentimen"))
 
@@ -119,9 +119,9 @@ def format_doc(doc: dict, nomor: int) -> str:
     )
 
 
-# ────────────────────────────────────────────────────────────
+# 
 # 4. TEMPLATE LOKASI INFO
-# ────────────────────────────────────────────────────────────
+# 
 
 def format_lokasi(wilayah: str | None, lat: float | None, lon: float | None) -> str:
     if wilayah and lat and lon:
@@ -134,9 +134,9 @@ def format_lokasi(wilayah: str | None, lat: float | None, lon: float | None) -> 
     return "Lokasi user tidak diketahui. Berikan rekomendasi umum Ciayumajakuning."
 
 
-# ────────────────────────────────────────────────────────────
+# 
 # 5. CONTOH SKENARIO PERCAKAPAN (untuk testing)
-# ────────────────────────────────────────────────────────────
+# 
 
 CONTOH_PERTANYAAN = [
     # Rekomendasi umum
@@ -158,8 +158,8 @@ CONTOH_PERTANYAAN = [
     "Budget 200rb bisa wisata ke mana di Indramayu?",
 
     # Edge cases (seharusnya dijawab dengan jujur)
-    "Restoran sushi terbaik di Indramayu",   # tidak relevan → redirect
-    "Harga hotel di Cirebon berapa?",         # di luar scope → jujur
+    "Restoran sushi terbaik di Indramayu",   # tidak relevan  redirect
+    "Harga hotel di Cirebon berapa?",         # di luar scope  jujur
 ]
 
 EXPECTED_BEHAVIORS = {
@@ -174,9 +174,9 @@ EXPECTED_BEHAVIORS = {
 }
 
 
-# ────────────────────────────────────────────────────────────
+# 
 # 6. PROMPT FALLBACK (jika tidak ada hasil retrieval)
-# ────────────────────────────────────────────────────────────
+# 
 
 FALLBACK_PROMPT = """
 {system_prompt}
@@ -189,14 +189,14 @@ Jawab dengan jujur bahwa kamu belum memiliki informasi spesifik tersebut,
 lalu tawarkan bantuan lain seperti rekomendasi wilayah atau kategori tempat
 yang tersedia di Ciayumajakuning.
 
-JAWABAN SITA:
+JAWABAN CITRA:
 """.strip()
 
 
-# ────────────────────────────────────────────────────────────
-# 7. PROMPT UNTUK DETEKSI INTENT (opsional — panggil Gemini sekali)
+# 
+# 7. PROMPT UNTUK DETEKSI INTENT (opsional  panggil Gemini sekali)
 #    Berguna jika ingin routing query ke endpoint yang tepat
-# ────────────────────────────────────────────────────────────
+# 
 
 INTENT_DETECTION_PROMPT = """
 Klasifikasikan pertanyaan user berikut ke salah satu intent:
