@@ -164,7 +164,8 @@ class ChatbotService:
         db: AsyncSession,
         latitude: float | None = None,
         longitude: float | None = None,
-        wilayah: str | None = None
+        wilayah: str | None = None,
+        user_id: str | None = None,
     ) -> dict:
         """
         Subtask 3: Buat sesi baru atau ambil yang sudah ada dari chatbot_sessions.
@@ -175,7 +176,7 @@ class ChatbotService:
         # Cek apakah session sudah ada
         row = await db.execute(
             text("""
-                SELECT session_token, messages, wilayah_terdeteksi, latitude, longitude 
+                SELECT session_token, messages, wilayah_terdeteksi, latitude, longitude, user_id
                 FROM chatbot_sessions 
                 WHERE session_token = :token
             """),
@@ -185,6 +186,17 @@ class ChatbotService:
         
         if existing:
             # Session sudah ada, return data existing
+            # Jika session sudah ada tapi belum terkait ke user dan sekarang ada user_id,
+            # kaitkan session tersebut ke user agar history tersimpan ke akun.
+            if user_id and (not existing.user_id):
+                await db.execute(
+                    text("""
+                        UPDATE chatbot_sessions SET user_id = :user_id WHERE session_token = :token
+                    """),
+                    {"user_id": user_id, "token": existing.session_token},
+                )
+                await db.commit()
+
             return {
                 "session_token": existing.session_token,
                 "messages": list(existing.messages or []),
@@ -204,11 +216,12 @@ class ChatbotService:
             await db.execute(
                 text("""
                     INSERT INTO chatbot_sessions 
-                    (id, session_token, messages, latitude, longitude, wilayah_terdeteksi, created_at)
-                    VALUES (:id, :token, '[]'::jsonb, :lat, :lon, :wilayah, NOW())
+                    (id, user_id, session_token, messages, latitude, longitude, wilayah_terdeteksi, created_at)
+                    VALUES (:id, :user_id, :token, '[]'::jsonb, :lat, :lon, :wilayah, NOW())
                 """),
                 {
                     "id": str(uuid4()),
+                    "user_id": user_id,
                     "token": new_token,
                     "lat": latitude,
                     "lon": longitude,
@@ -811,7 +824,7 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
     # Metode Utama (Menggunakan Subtask 2 & 3)
     # ========================================================================
 
-    async def ask(self, payload: ChatRequest, db: AsyncSession) -> ChatResponse:
+    async def ask(self, payload: ChatRequest, db: AsyncSession, user_id: str | None = None) -> ChatResponse:
         """
         Method ask yang sudah direfactor menggunakan fungsi Subtask 2 & 3.
         """
@@ -824,7 +837,8 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
                 db=db,
                 latitude=payload.latitude,
                 longitude=payload.longitude,
-                wilayah=self.detect_wilayah_from_text(payload.message) or "Indramayu"
+                wilayah=self.detect_wilayah_from_text(payload.message) or "Indramayu",
+                user_id=user_id,
             )
             session_token = session_data["session_token"]
             history = session_data["messages"]
@@ -887,7 +901,8 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
             db=db,
             latitude=payload.latitude,
             longitude=payload.longitude,
-            wilayah=wilayah
+            wilayah=wilayah,
+            user_id=user_id,
         )
         
         session_token = session_data["session_token"]
