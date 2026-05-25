@@ -17,6 +17,7 @@ import asyncio
 import json
 import math
 import os
+import re
 from datetime import datetime
 from uuid import uuid4
 
@@ -70,9 +71,53 @@ if not GEMINI_API_KEY and not GROQ_API_KEY:
 class ChatbotService:
     """Async service for chatbot workflows using RAG Pipeline."""
 
+    WILAYAH_LIST = ("Indramayu", "Cirebon", "Majalengka", "Kuningan")
+
     @staticmethod
     def _timestamp() -> str:
         return datetime.utcnow().isoformat()
+
+    @staticmethod
+    def _parse_nominal_to_int(raw: str) -> int | None:
+        """Parse nominal Indonesia seperti 10.000, 20rb, 1jt menjadi integer."""
+        if not raw:
+            return None
+
+        value = raw.lower().replace("rp", "").replace(" ", "")
+        multiplier = 1
+        if value.endswith("rb") or value.endswith("k"):
+            multiplier = 1_000
+            value = value[:-2] if value.endswith("rb") else value[:-1]
+        elif value.endswith("jt"):
+            multiplier = 1_000_000
+            value = value[:-2]
+
+        value = value.replace(".", "").replace(",", "")
+        if not value.isdigit():
+            return None
+        return int(value) * multiplier
+
+    @classmethod
+    def parse_budget_range_from_text(cls, text: str) -> tuple[int | None, int | None]:
+        """Ekstrak budget min/max dari teks user jika ada."""
+        if not text:
+            return None, None
+
+        lowered = text.lower()
+        pair_match = re.search(r"((?:rp\s?)?[\d\.,]+\s?(?:rb|k|jt)?)\s*(?:-|sampai|hingga|to)\s*((?:rp\s?)?[\d\.,]+\s?(?:rb|k|jt)?)", lowered)
+        if pair_match:
+            bmin = cls._parse_nominal_to_int(pair_match.group(1))
+            bmax = cls._parse_nominal_to_int(pair_match.group(2))
+            if bmin is not None and bmax is not None:
+                return (min(bmin, bmax), max(bmin, bmax))
+
+        single_match = re.search(r"budget\s*(?:di|sekitar|maks)?\s*((?:rp\s?)?[\d\.,]+\s?(?:rb|k|jt)?)", lowered)
+        if single_match:
+            nominal = cls._parse_nominal_to_int(single_match.group(1))
+            if nominal is not None:
+                return 0, nominal
+
+        return None, None
 
     # ========================================================================
     # SUBTASK 3 — Geolokasi & Session Functions
@@ -292,7 +337,9 @@ class ChatbotService:
         wilayah_filter: str | None = None, 
         top_k: int = 3,
         lat: float = None,
-        lng: float = None
+        lng: float = None,
+        budget_min: int | None = None,
+        budget_max: int | None = None,
     ) -> list:
         """
         Retrieval dari database PostgreSQL menggunakan FTS dan Filter Wilayah.
@@ -355,6 +402,12 @@ class ChatbotService:
         if tipe_filter:
             where_parts.append("tipe = :tipe")
             params["tipe"] = tipe_filter
+        if budget_min is not None:
+            where_parts.append("COALESCE(harga_max, harga_min, 0) >= :budget_min")
+            params["budget_min"] = budget_min
+        if budget_max is not None:
+            where_parts.append("COALESCE(harga_min, 0) <= :budget_max")
+            params["budget_max"] = budget_max
         
         where_clause = " AND ".join(where_parts)
 
@@ -391,31 +444,49 @@ class ChatbotService:
         # 3. Fallback: Jika FTS kosong dan ada koordinat, ambil data terdekat
         if not docs and lat is not None and lng is not None:
             tipe_clause = f"AND tipe = '{tipe_filter}'" if tipe_filter else ""
+            budget_clause = ""
+            if budget_min is not None:
+                budget_clause += " AND COALESCE(harga_max, harga_min, 0) >= :budget_min"
+            if budget_max is not None:
+                budget_clause += " AND COALESCE(harga_min, 0) <= :budget_max"
             sql_nearby = text(f"""
                 SELECT *{distance_col}
                 FROM v_all_tempat
-                WHERE wilayah ILIKE :wilayah {tipe_clause}
+                WHERE wilayah ILIKE :wilayah {tipe_clause} {budget_clause}
                 ORDER BY distance ASC
                 LIMIT :limit
             """)
             params_nearby = {"wilayah": wilayah_filter, "limit": top_k} if wilayah_filter else {"limit": top_k}
+            if budget_min is not None:
+                params_nearby["budget_min"] = budget_min
+            if budget_max is not None:
+                params_nearby["budget_max"] = budget_max
             result = await db.execute(sql_nearby, params_nearby)
             docs = result.fetchall()
 
         # 4. Fallback terakhir: ambil data populer di wilayah + tipe
         if not docs:
             tipe_clause = f"AND tipe = :tipe" if tipe_filter else ""
+            budget_clause = ""
+            if budget_min is not None:
+                budget_clause += " AND COALESCE(harga_max, harga_min, 0) >= :budget_min"
+            if budget_max is not None:
+                budget_clause += " AND COALESCE(harga_min, 0) <= :budget_max"
             wilayah_clause = "WHERE wilayah ILIKE :wilayah" if wilayah_filter else "WHERE 1=1"
             params_pop = {"limit": top_k}
             if wilayah_filter:
                 params_pop["wilayah"] = wilayah_filter
             if tipe_filter:
                 params_pop["tipe"] = tipe_filter
+            if budget_min is not None:
+                params_pop["budget_min"] = budget_min
+            if budget_max is not None:
+                params_pop["budget_max"] = budget_max
             
             sql_popular = text(f"""
                 SELECT *
                 FROM v_all_tempat
-                {wilayah_clause} {tipe_clause}
+                {wilayah_clause} {tipe_clause} {budget_clause}
                 ORDER BY rating_google DESC NULLS LAST
                 LIMIT :limit
             """)
@@ -506,6 +577,95 @@ class ChatbotService:
                 system_prompt=SYSTEM_PROMPT,
                 pertanyaan=user_message
             )
+
+    @classmethod
+    def _build_relevant_followup_suggestions(cls, wilayah: str | None) -> str:
+        """Buat contoh pertanyaan lanjutan yang relevan dengan wilayah aktif."""
+        target = wilayah if wilayah in cls.WILAYAH_LIST else "Ciayumajakuning"
+        if target in cls.WILAYAH_LIST:
+            return (
+                "\n\n**Coba tanya SITA hal lain seperti:**\n"
+                f"- \"Rekomendasi wisata alam di {target}\"\n"
+                f"- \"Kuliner khas {target} yang enak\"\n"
+                f"- \"Tempat nongkrong yang nyaman di {target}\""
+            )
+        return (
+            "\n\n**Coba tanya SITA hal lain seperti:**\n"
+            "- \"Rekomendasi wisata alam di Indramayu\"\n"
+            "- \"Kuliner legendaris Cirebon\"\n"
+            "- \"Tempat nongkrong nyaman di Kuningan\""
+        )
+
+    @classmethod
+    def _build_grounded_answer(
+        cls,
+        docs: list,
+        wilayah: str | None,
+        budget_min: int | None = None,
+        budget_max: int | None = None,
+    ) -> str:
+        """Jawaban deterministic berbasis dokumen DB agar bebas halusinasi."""
+        if not docs:
+            budget_text = ""
+            if budget_min is not None or budget_max is not None:
+                low = f"Rp{budget_min:,}" if budget_min is not None else "bebas"
+                high = f"Rp{budget_max:,}" if budget_max is not None else "bebas"
+                budget_text = f" untuk rentang budget {low} - {high}"
+            return (
+                f"Maaf, SITA belum menemukan data yang cocok{budget_text}. "
+                "Silakan coba ubah kata kunci, wilayah, atau rentang budget."
+            )
+
+        scope = wilayah if wilayah in cls.WILAYAH_LIST else "Ciayumajakuning"
+        lines = [f"🏞️ Berikut rekomendasi wisata di **{scope}** dari data yang tersedia:"]
+
+        for i, doc in enumerate(docs[:3], 1):
+            d = cls._row_to_dict(doc)
+            nama = d.get("nama", "-")
+            maps = d.get("link_google_maps") or "Tidak tersedia"
+            area = d.get("wilayah") or "-"
+            harga_min = d.get("harga_min")
+            harga_max = d.get("harga_max")
+            if isinstance(harga_min, int) and isinstance(harga_max, int):
+                if harga_min == 0 and harga_max == 0:
+                    harga_text = "Gratis"
+                elif harga_min == harga_max:
+                    harga_text = f"Rp{harga_min:,}"
+                else:
+                    harga_text = f"Rp{harga_min:,} - Rp{harga_max:,}"
+            else:
+                harga_text = "Tidak tersedia"
+            lines.append(f"{i}. **{nama}** ({area}) - Estimasi biaya: {harga_text} - Maps: {maps}")
+
+        lines.append("\nSemua rekomendasi di atas diambil dari data database Smart Tourism.")
+        lines.append(cls._build_relevant_followup_suggestions(wilayah))
+        lines.append("\nAda lagi yang bisa SITA bantu?")
+        return "\n".join(lines)
+
+    @classmethod
+    def _is_answer_grounded(cls, answer: str, docs: list, wilayah_filter: str | None) -> bool:
+        """Validasi ringan agar jawaban tidak keluar konteks dokumen/wilayah."""
+        if not answer:
+            return False
+
+        lowered = answer.lower()
+        if docs:
+            allowed_names = {
+                (cls._row_to_dict(doc).get("nama") or "").lower().strip()
+                for doc in docs[:5]
+            }
+            allowed_names = {n for n in allowed_names if n}
+            if allowed_names and not any(n in lowered for n in allowed_names):
+                return False
+
+        if wilayah_filter and wilayah_filter in cls.WILAYAH_LIST:
+            for wilayah in cls.WILAYAH_LIST:
+                if wilayah == wilayah_filter:
+                    continue
+                if wilayah.lower() in lowered:
+                    return False
+
+        return True
 
     # --- Helper: Async wrapper untuk LLM API (Gemini / Groq) ---
     async def _generate_gemini_response(self, prompt: str, docs: list = None) -> str:
@@ -706,8 +866,8 @@ class ChatbotService:
             header = f"🔍 **Maaf, SITA belum menemukan data yang cocok.**"
             items_text = "Pastikan tempat yang kamu cari berada di wilayah Cirebon, Indramayu, Majalengka, atau Kuningan."
 
-        # Tambahkan Contoh Pertanyaan Relevan di akhir
-        suggestions = f"\n\n**Coba tanya SITA hal lain seperti:**\n- \"Rekomendasi wisata alam di Majalengka\"\n- \"Kuliner Nasi Jamblang yang enak di Cirebon\"\n- \"Berapa tiket masuk Waduk Darma?\""
+        # Tambahkan Contoh Pertanyaan Relevan di akhir (sesuai wilayah aktif)
+        suggestions = ChatbotService._build_relevant_followup_suggestions(wilayah)
 
         return f"""{header}
 
@@ -907,6 +1067,9 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
         
         session_token = session_data["session_token"]
         history = session_data["messages"]
+
+        # 4.1 Parse budget range dari teks user (jika ada)
+        budget_min, budget_max = self.parse_budget_range_from_text(payload.message)
         
         # 5. RAG Pipeline (Subtask 2)
         docs = await self.retrieve_from_db(
@@ -915,7 +1078,9 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
             wilayah_filter=wilayah_filter,
             top_k=5,
             lat=payload.latitude,
-            lng=payload.longitude
+            lng=payload.longitude,
+            budget_min=budget_min,
+            budget_max=budget_max,
         )
         context = self.build_context(docs)
         
@@ -929,6 +1094,13 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
         )
         
         answer = await self._generate_gemini_response(prompt, docs)
+        if not self._is_answer_grounded(answer, docs, wilayah_filter):
+            answer = self._build_grounded_answer(
+                docs=docs,
+                wilayah=wilayah_filter or wilayah,
+                budget_min=budget_min,
+                budget_max=budget_max,
+            )
         
         # 5. Simpan message ke history
         user_message_dict = {
