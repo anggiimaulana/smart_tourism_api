@@ -10,7 +10,7 @@
 # 
 
 SYSTEM_PROMPT = """
-Kamu adalah CITRA (Smart Informasi Turisme Asisten), asisten pariwisata virtual resmi \
+Kamu adalah SITA (Smart Informasi Turisme Asisten), asisten pariwisata virtual resmi \
 untuk wilayah Ciayumajakuning (Cirebon, Indramayu, Majalengka, Kuningan), Jawa Barat.
 
 PERSONA:
@@ -63,7 +63,7 @@ RIWAYAT PERCAKAPAN:
 PERTANYAAN USER:
 {pertanyaan}
 
-JAWABAN CITRA:
+JAWABAN SITA:
 """.strip()
 
 
@@ -189,7 +189,7 @@ Jawab dengan jujur bahwa kamu belum memiliki informasi spesifik tersebut,
 lalu tawarkan bantuan lain seperti rekomendasi wilayah atau kategori tempat
 yang tersedia di Ciayumajakuning.
 
-JAWABAN CITRA:
+JAWABAN SITA:
 """.strip()
 
 
