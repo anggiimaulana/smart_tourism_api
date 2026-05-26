@@ -51,7 +51,7 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
 @router.post(
     "/login",
     response_model=BaseResponse,
-    status_code=201,
+    status_code=200,
     summary="Login → dapatkan JWT access token",
 )
 async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
