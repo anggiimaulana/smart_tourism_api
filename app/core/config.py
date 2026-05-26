@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     APP_NAME:    str = "Smart Tourism Ciayumajakuning API"
     APP_VERSION: str = "1.0.0"
     DEBUG:       bool = True
+    LARAVEL_URL: str = "http://127.0.0.1:8000"
 
     # ── Database ──────────────────────────────────────────────
     # Format: postgresql+asyncpg://USER:PASSWORD@HOST:PORT/DBNAME

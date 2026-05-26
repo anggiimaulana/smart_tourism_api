@@ -22,7 +22,9 @@ class RegisterRequest(BaseModel):
         if len(v) < 8:
             raise ValueError("Password minimal 8 karakter")
         if not re.search(r"[A-Z]", v):
-            raise ValueError("Password harus mengandung minimal 1 huruf kapital")
+            raise ValueError("Password harus mengandung minimal 1 huruf besar")
+        if not re.search(r"[a-z]", v):
+            raise ValueError("Password harus mengandung minimal 1 huruf kecil")
         if not re.search(r"\d", v):
             raise ValueError("Password harus mengandung minimal 1 angka")
         return v
@@ -49,5 +51,13 @@ class UserProfileResponse(BaseModel):
     role:       str
     avatar_url: Optional[str] = None
     is_active:  bool
+ 
+    @field_validator("avatar_url", mode="after")
+    @classmethod
+    def prepend_base_url(cls, v: Optional[str]) -> Optional[str]:
+        if v and not v.startswith("http"):
+            from app.core.config import settings
+            return f"{settings.LARAVEL_URL.rstrip('/')}/storage/{v}"
+        return v
  
     model_config = ConfigDict(from_attributes=True)
