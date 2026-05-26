@@ -96,6 +96,12 @@ alembic revision --autogenerate -m "nama perubahan"
 alembic upgrade head
 ```
 
+### Catatan cache chatbot
+
+- Tabel `chatbot_cache` tidak dibuat oleh runtime request.
+- Tabel tersebut harus hadir dari bootstrap schema `sql/01_schema.sql` saat reset database, dan dari migration Alembic saat `alembic upgrade head`.
+- Setelah reset DB, cache langsung tersedia bersama tabel lain.
+
 ### Reset seperti Laravel
 
 Kalau kamu mau reset database lalu migrate + seed lagi dalam satu langkah, pakai script ini:
@@ -174,8 +180,10 @@ pytest tests/test_recommendation.py -v
 ### Chatbot
 
 - Siapkan prompt di `prompts/chatbot_prompts.py`.
-- Pastikan koneksi Gemini aktif lewat `GEMINI_API_KEY`.
-- Implementasi retrieval dan session management ada di `app/services/chatbot_service.py`.
+- Respons statis seperti identitas, error umum, dan penolakan out-of-scope ditangani deterministik tanpa memanggil LLM.
+- Payload FastAPI yang menjadi sumber kebenaran untuk Laravel harus berada di `data` dari wrapper `BaseResponse`.
+- Implementasi retrieval, session management, dan cache exact-match ada di `app/services/chatbot_service.py`.
+- Mode LLM bisa dinyalakan lagi sebagai opsi kalau dibutuhkan jawaban yang lebih natural, tetapi tetap gunakan jalur deterministik sebagai fallback utama supaya response stabil.
 
 ## 13. Urutan Kerja yang Disarankan
 

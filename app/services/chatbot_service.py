@@ -10,20 +10,22 @@ Target kerja berdasarkan README:
 
 from __future__ import annotations
 
-from dotenv import load_dotenv
-load_dotenv()
-
 import asyncio
 import json
 import math
 import os
 import re
+import logging
 from datetime import datetime
 from uuid import uuid4
+
+from dotenv import load_dotenv
+load_dotenv()
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.schemas.chatbot import ChatHistoryResponse, ChatRequest, ChatResponse
 
 # Import dari prompts/chatbot_prompts.py
@@ -33,6 +35,21 @@ from prompts.chatbot_prompts import (
     FALLBACK_PROMPT,
     format_doc,
     format_lokasi,
+)
+
+# Intent classification & static responses
+from app.services.intent_classifier import classify_intent
+from app.services.static_responses import (
+    get_identity_response,
+    get_greeting_response,
+    get_thanks_response,
+    get_farewell_response,
+    get_out_of_scope_location_response,
+    get_out_of_scope_topic_response,
+    get_dangerous_content_response,
+    get_unknown_intent_response,
+    get_no_data_response,
+    build_followup_suggestions,
 )
 
 #  LLM Provider Configuration 
@@ -60,12 +77,75 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 GEMINI_MODEL = None
 
 if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    GEMINI_MODEL = genai.GenerativeModel("gemini-2.0-flash")
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        GEMINI_MODEL = genai.GenerativeModel("gemini-2.0-flash")
+    except Exception:
+        GEMINI_MODEL = None
 
-# Validasi: minimal satu provider harus tersedia
-if not GEMINI_API_KEY and not GROQ_API_KEY:
-    raise ValueError("Minimal satu API key harus diset: GEMINI_API_KEY atau GROQ_API_KEY")
+# Do not raise if keys are missing — support working in degraded mode using deterministic
+# fallback that relies on DB content. Track whether any LLM provider is available.
+LLM_ENABLED = bool(GEMINI_MODEL or GROQ_CLIENT)
+logger = logging.getLogger(__name__)
+if not LLM_ENABLED:
+    logger.warning("No LLM API keys configured or providers unavailable — running in fallback-only mode.")
+
+
+def get_llm_runtime_status() -> dict:
+    return {
+        "llm_enabled": LLM_ENABLED,
+        "gemini_enabled": bool(GEMINI_MODEL),
+        "groq_enabled": bool(GROQ_CLIENT),
+        "provider": LLM_PROVIDER,
+    }
+
+
+# Daftar Provinsi Indonesia (untuk deteksi lokasi out-of-scope)
+SUPPORTED_REGIONS = {
+    "cirebon", "indramayu", "majalengka", "kuningan", "ciayumajakuning", "jawa barat"
+}
+
+INDONESIAN_PROVINCES = {
+    "aceh", "sumatera utara", "sumatera barat", "riau", "jambi", "sumatera selatan",
+    "bengkulu", "lampung", "kepulauan bangka belitung", "kepulauan riau",
+    "jawa barat", "jakarta", "jawa tengah", "yogyakarta", "jawa timur",
+    "bali", "nusa tenggara barat", "nusa tenggara timur",
+    "kalimantan barat", "kalimantan tengah", "kalimantan selatan", "kalimantan timur", "kalimantan utara",
+    "sulawesi utara", "sulawesi tengah", "sulawesi selatan", "sulawesi tenggara", "sulawesi barat",
+    "maluku", "maluku utara",
+    "papua", "papua barat", "papua barat daya", "papua tengah", "papua pegunungan",
+}
+
+MAJOR_INDONESIAN_CITIES = {
+    "jakarta", "surabaya", "bandung", "medan", "semarang", "makassar", "palembang",
+    "yogyakarta", "malang", "tangerang", "bogor", "depok", "bekasi", "cirebon",
+    "pekanbaru", "padang", "batam", "balikpapan", "banjarmasin", "manado", "jayapura",
+    "kupang", "mataram", "denpasar", "ambon", "ternate",
+}
+
+
+def _extract_locations_from_text(text: str) -> set:
+    """Extract potential location mentions dari text. Return set lokasi (lowercase)."""
+    text_lower = text.lower()
+    locations = set()
+    for prov in INDONESIAN_PROVINCES:
+        if prov in text_lower:
+            locations.add(prov)
+    for city in MAJOR_INDONESIAN_CITIES:
+        if city in text_lower:
+            locations.add(city)
+    return locations
+
+
+def _is_location_in_supported_region(location: str) -> bool:
+    """Check apakah lokasi dalam wilayah Ciayumajakuning."""
+    loc_lower = location.lower().strip()
+    if loc_lower in SUPPORTED_REGIONS:
+        return True
+    for supported in SUPPORTED_REGIONS:
+        if supported in loc_lower:
+            return True
+    return False
 
 
 class ChatbotService:
@@ -130,24 +210,15 @@ class ChatbotService:
         """
         if not text:
             return None
+            
+        from app.services.intent_classifier import _normalize_text
+        text_norm = _normalize_text(text)
         
-        text_lower = text.lower()
-        
-        # Mapping keyword ke nama wilayah resmi
-        wilayah_keywords = {
-            "cirebon": "Cirebon",
-            "indramayu": "Indramayu", 
-            "majalengka": "Majalengka",
-            "kuningan": "Kuningan",
-            # Tambah variasi penulisan
-            "cirebonan": "Cirebon",
-            "indramayuan": "Indramayu",
-        }
-        
-        for keyword, wilayah in wilayah_keywords.items():
-            if keyword in text_lower:
-                return wilayah
-        
+        wilayah_list = ["cirebon", "indramayu", "majalengka", "kuningan"]
+        for wilayah in wilayah_list:
+            if wilayah in text_norm:
+                return wilayah.capitalize()
+                
         return None
 
     @staticmethod
@@ -340,6 +411,7 @@ class ChatbotService:
         lng: float = None,
         budget_min: int | None = None,
         budget_max: int | None = None,
+        is_planning: bool = False,
     ) -> list:
         """
         Retrieval dari database PostgreSQL menggunakan FTS dan Filter Wilayah.
@@ -372,9 +444,14 @@ class ChatbotService:
         words = re.sub(r'[^\w\s]', '', user_message).lower().split()
         filtered_words = [w for w in words if w not in stopwords and len(w) > 2]
         
+        if is_planning:
+            tipe_filter = None
+            
         # Buat query string dengan OR operator untuk FTS
         if filtered_words:
             query_str = " | ".join(filtered_words)
+            if is_planning:
+                query_str += " | wisata | kuliner | nongkrong"
         else:
             query_str = "wisata | kuliner | nongkrong"
 
@@ -394,7 +471,8 @@ class ChatbotService:
 
         # Build WHERE clause
         where_parts = ["fts @@ to_tsquery('indonesian', :query)"]
-        params = {"query": query_str, "limit": top_k}
+        db_limit = 30 if is_planning else top_k
+        params = {"query": query_str, "limit": db_limit}
         
         if wilayah_filter:
             where_parts.append("wilayah ILIKE :wilayah")
@@ -495,9 +573,43 @@ class ChatbotService:
 
         # 5. Distribusi merata antar wilayah jika query multi-wilayah (tanpa filter)
         if not wilayah_filter and docs and len(docs) > 1:
-            docs = ChatbotService._balance_by_wilayah(docs, top_k)
+            docs = ChatbotService._balance_by_wilayah(docs, db_limit)
+
+        # 6. Distribusi merata antar tipe (wisata, kuliner, nongkrong) jika planning
+        if is_planning and docs and len(docs) > 1:
+            docs = ChatbotService._balance_by_tipe(docs, top_k)
 
         return docs[:top_k]
+
+    @staticmethod
+    def _balance_by_tipe(docs: list, top_k: int) -> list:
+        """Distribusi hasil merata antar tipe (wisata, kuliner, nongkrong)."""
+        from collections import defaultdict
+        
+        by_tipe = defaultdict(list)
+        for doc in docs:
+            t = getattr(doc, 'tipe', None) or 'wisata'
+            by_tipe[t].append(doc)
+            
+        balanced = []
+        # Urutan prioritas: wisata, kuliner, nongkrong
+        categories = ["wisata", "kuliner", "nongkrong"]
+        pointers = {cat: 0 for cat in categories}
+        
+        while len(balanced) < top_k:
+            added_in_round = False
+            for cat in categories:
+                if len(balanced) >= top_k:
+                    break
+                if pointers[cat] < len(by_tipe[cat]):
+                    balanced.append(by_tipe[cat][pointers[cat]])
+                    pointers[cat] += 1
+                    added_in_round = True
+            
+            if not added_in_round:
+                break
+                
+        return balanced
 
     @staticmethod
     def _balance_by_wilayah(docs: list, top_k: int) -> list:
@@ -596,6 +708,67 @@ class ChatbotService:
             "- \"Tempat nongkrong nyaman di Kuningan\""
         )
 
+    # ----------------------------
+    # CACHING (Exact-match prototype)
+    # ----------------------------
+    @staticmethod
+    def _normalize_query(text: str) -> str:
+        """Normalize query for exact-match caching: lowercase, strip punctuation, collapse whitespace."""
+        import string
+        if not text:
+            return ""
+        t = text.lower()
+        t = t.translate(str.maketrans('', '', string.punctuation))
+        t = re.sub(r"\s+", " ", t).strip()
+        return t
+
+    @staticmethod
+    def _hash_query(normalized: str) -> str:
+        import hashlib
+        return hashlib.sha256(normalized.encode('utf-8')).hexdigest()
+
+    async def _get_cached_answer(self, db: AsyncSession, qhash: str) -> dict | None:
+        try:
+            row = await db.execute(text("SELECT id, answer, hit_count FROM chatbot_cache WHERE query_hash = :qhash"), {"qhash": qhash})
+            res = row.fetchone()
+            if not res:
+                return None
+            # increment hit_count
+            await db.execute(text("UPDATE chatbot_cache SET hit_count = hit_count + 1, updated_at = now() WHERE id = :id"), {"id": str(res.id)})
+            await db.commit()
+            return res.answer
+        except Exception as e:
+            logger.warning(f"Cache read failed (table may not exist): {e}")
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            return None
+
+    async def _save_cache(self, db: AsyncSession, qhash: str, normalized: str, answer_obj: dict) -> None:
+        try:
+            await db.execute(
+                text("""
+                INSERT INTO chatbot_cache (id, query_hash, query_normalized, answer, created_at, updated_at)
+                VALUES (:id, :qhash, :normalized, :answer::jsonb, now(), now())
+                ON CONFLICT (query_hash) DO UPDATE SET answer = EXCLUDED.answer, updated_at = now()
+                """),
+                {
+                    "id": str(uuid4()),
+                    "qhash": qhash,
+                    "normalized": normalized,
+                    "answer": json.dumps(answer_obj),
+                }
+            )
+            await db.commit()
+        except Exception as e:
+            logger.warning(f"Cache write failed (table may not exist): {e}")
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+
+
     @classmethod
     def _build_grounded_answer(
         cls,
@@ -606,24 +779,33 @@ class ChatbotService:
     ) -> str:
         """Jawaban deterministic berbasis dokumen DB agar bebas halusinasi."""
         if not docs:
-            budget_text = ""
-            if budget_min is not None or budget_max is not None:
-                low = f"Rp{budget_min:,}" if budget_min is not None else "bebas"
-                high = f"Rp{budget_max:,}" if budget_max is not None else "bebas"
-                budget_text = f" untuk rentang budget {low} - {high}"
-            return (
-                f"Maaf, SITA belum menemukan data yang cocok{budget_text}. "
-                "Silakan coba ubah kata kunci, wilayah, atau rentang budget."
-            )
+            return get_no_data_response(wilayah)
 
         scope = wilayah if wilayah in cls.WILAYAH_LIST else "Ciayumajakuning"
-        lines = [f" Berikut rekomendasi wisata di **{scope}** dari data yang tersedia:"]
+
+        # Detect dominant category from docs for header label
+        tipe_counts = {}
+        for doc in docs[:3]:
+            d = cls._row_to_dict(doc)
+            t = d.get("tipe", "wisata")
+            tipe_counts[t] = tipe_counts.get(t, 0) + 1
+        dominant_tipe = max(tipe_counts, key=tipe_counts.get) if tipe_counts else "wisata"
+        
+        tipe_label = {"wisata": "wisata", "kuliner": "kuliner", "nongkrong": "tempat nongkrong"}
+        tipe_emoji = {"wisata": "🏖️", "kuliner": "🍜", "nongkrong": "☕"}
+        label = tipe_label.get(dominant_tipe, "wisata")
+        emoji = tipe_emoji.get(dominant_tipe, "🏖️")
+
+        lines = [f"{emoji} Berikut rekomendasi **{label}** di **{scope}** dari data yang tersedia:"]
 
         for i, doc in enumerate(docs[:3], 1):
             d = cls._row_to_dict(doc)
             nama = d.get("nama", "-")
             maps = d.get("link_google_maps") or "Tidak tersedia"
             area = d.get("wilayah") or "-"
+            alamat = d.get("alamat_lengkap") or d.get("alamat") or "Tidak tersedia"
+            jam_buka = d.get("jam_buka") or "?"
+            jam_tutup = d.get("jam_tutup") or "?"
             harga_min = d.get("harga_min")
             harga_max = d.get("harga_max")
             if isinstance(harga_min, int) and isinstance(harga_max, int):
@@ -635,10 +817,19 @@ class ChatbotService:
                     harga_text = f"Rp{harga_min:,} - Rp{harga_max:,}"
             else:
                 harga_text = "Tidak tersedia"
-            lines.append(f"{i}. **{nama}** ({area}) - Estimasi biaya: {harga_text} - Maps: {maps}")
+            deskripsi = (d.get("deskripsi") or "").strip()
+            deskripsi_text = f" - {deskripsi[:140]}" if deskripsi else ""
+            lines.append(
+                f"{i}. **{nama}** ({area})\n"
+                f"   - Lokasi: {alamat}\n"
+                f"   - Jam buka: {jam_buka} - {jam_tutup}\n"
+                f"   - Estimasi biaya: {harga_text}\n"
+                f"   - Maps: {maps}"
+                f"{deskripsi_text}"
+            )
 
         lines.append("\nSemua rekomendasi di atas diambil dari data database Smart Tourism.")
-        lines.append(cls._build_relevant_followup_suggestions(wilayah))
+        lines.append(build_followup_suggestions(wilayah))
         lines.append("\nAda lagi yang bisa SITA bantu?")
         return "\n".join(lines)
 
@@ -673,6 +864,11 @@ class ChatbotService:
         
         import time
 
+        # If LLM is not enabled, skip attempts and return mock fallback
+        if not LLM_ENABLED:
+            logger.info("LLM disabled — using deterministic fallback for response.")
+            return ChatbotService._get_mock_fallback(prompt, docs)
+
         # Tentukan urutan provider berdasarkan konfigurasi
         if LLM_PROVIDER == "groq" and GROQ_CLIENT:
             providers = [("groq", self._call_groq), ("gemini", self._call_gemini)]
@@ -680,16 +876,20 @@ class ChatbotService:
             providers = [("gemini", self._call_gemini), ("groq", self._call_groq)]
 
         for provider_name, call_fn in providers:
+            logger.info(f"Attempting LLM provider: {provider_name}")
             try:
                 result = await asyncio.to_thread(call_fn, prompt)
                 if result:
+                    logger.info(f"LLM provider {provider_name} returned a response")
                     return result
+                else:
+                    logger.warning(f"LLM provider {provider_name} returned empty response")
             except Exception as e:
-                print(f"Warning: {provider_name} failed: {e}")
+                logger.warning(f"{provider_name} failed: {e}")
                 continue
 
-        # Semua provider gagal  fallback ke mock
-        print("Warning: All LLM providers failed. Using mock response.")
+        # Semua provider gagal -> fallback
+        logger.warning("All LLM providers failed. Using mock deterministic fallback.")
         return ChatbotService._get_mock_fallback(prompt, docs)
 
     @staticmethod
@@ -703,7 +903,10 @@ class ChatbotService:
 
         for attempt in range(2):
             try:
-                response = GEMINI_MODEL.generate_content(prompt)
+                response = GEMINI_MODEL.generate_content(
+                    prompt,
+                    generation_config={"max_output_tokens": 2048}
+                )
                 return response.text
             except ResourceExhausted:
                 if attempt < 1:
@@ -732,7 +935,7 @@ class ChatbotService:
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.7,
-                max_tokens=1024,
+                max_tokens=2048,
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -756,6 +959,17 @@ class ChatbotService:
         user_part_raw = prompt.split("PERTANYAAN USER:")[-1].split("JAWABAN SITA:")[0] if "PERTANYAAN USER:" in prompt else prompt
         user_part = sanitize(user_part_raw)
 
+        tourism_keywords = [
+            "wisata", "kuliner", "makan", "makanan", "restoran", "rumah makan",
+            "nongkrong", "cafe", "kopi", "coffee", "tempat", "rekomen",
+            "rekomendasi", "liburan", "pantai", "gunung", "taman", "museum",
+            "jalan-jalan", "jajanan", "mampir",
+        ]
+        has_tourism_intent = any(k in user_part for k in tourism_keywords)
+        mentions_supported_scope = any(
+            k in user_part for k in ["ciayumajakuning", "cirebon", "indramayu", "majalengka", "kuningan"]
+        )
+
         # 1. Deteksi wilayah
         wilayah = "wilayah tersebut"
         match = re.search(r"wilayah[:\s]+([A-Za-z\s]+)", prompt, re.IGNORECASE)
@@ -766,36 +980,129 @@ class ChatbotService:
 
         # --- 1. DETEKSI OUT-OF-SCOPE & IRRELEVANT (PRIORITAS UTAMA) ---
         out_of_scope_keywords = [
-            "jakarta", "bandung", "jogja", "yogyakarta", "bali", "lombok", "surabaya", 
-            "semarang", "malang", "labuan", "labuhan", "bajo", "raja ampat", "medan", 
-            "makassar", "singapura", "malaysia", "monas", "borobudur", "prambanan"
+            "papua", "jayapura", "manokwari", "biak", "raja ampat",
+            "jakarta", "bandung", "bogor", "depok", "tangerang", "bekasi",
+            "jogja", "yogyakarta", "bali", "lombok", "surabaya", "semarang", "malang",
+            "labuan", "labuhan", "bajo", "medan", "makassar", "singapura", "malaysia",
+            "monas", "borobudur", "prambanan", "aceh", "jepara", "jepang", "japan",
+            "korea", "thailand", "vietnam",
         ]
         
         irrelevant_topics = [
             "politik", "presiden", "agama", "tugas sekolah", "matematika", "rumus", 
             "coding", "programming", "uang", "pinjol", "jodoh", "pacar", "nikah",
-            "berita", "gempa", "kriminal", "hantu", "misteri", "siapa penemu", "siapa yang membuat"
+            "berita", "gempa", "kriminal", "hantu", "misteri", "siapa penemu", "siapa yang membuat",
+            "proklamasi", "pancasila", "sejarah indonesia", "kemerdekaan", "soekarno", "hatta",
+            "flutter", "dart", "php", "golang", "typescript", "react", "laravel", "mysql", "postgresql",
+            "nodejs", "html", "css", "javascript", "python", "kode program", "sistem atm", "atm sederhana",
         ]
 
         is_out_of_scope = any(k in user_part for k in out_of_scope_keywords)
         is_irrelevant = any(k in user_part for k in irrelevant_topics)
 
+        if any(k in user_part for k in ["siapa kamu", "nama kamu", "siapa dirimu", "apa itu sita", "kamu siapa"]):
+            return "Halo! Saya **SITA** (Smart Tourism Information Assistant), asisten virtual pariwisata Ciayumajakuning. Saya bisa bantu kamu cari info wisata, kuliner, atau tempat nongkrong keren!"
+
         if is_out_of_scope:
-            return f" **Maaf ya, jangkauan informasi SITA saat ini terbatas di wilayah Ciayumajakuning saja.**\n\nSITA belum bisa memberikan informasi untuk tempat di luar Cirebon, Indramayu, Majalengka, dan Kuningan. Silakan tanya SITA tentang destinasi di wilayah tersebut ya!"
-        
-        if is_irrelevant:
+            found = next((k for k in out_of_scope_keywords if k in user_part), None)
+            found_text = f" tentang {found}" if found else ""
+            return (
+                " **Maaf, SITA hanya bisa membantu wilayah Ciayumajakuning (Cirebon, Indramayu, Majalengka, dan Kuningan).**\n\n"
+                f"Permintaan kamu menyebut lokasi atau topik di luar cakupan SITA{found_text}, jadi saya tidak bisa memprosesnya.\n\n"
+                "Coba tanya salah satu ini:\n"
+                "- \"Wisata alam di Kuningan\"\n"
+                "- \"Kuliner legendaris Cirebon\"\n"
+                "- \"Tempat nongkrong nyaman di Majalengka\""
+            )
+
+        # ----------------------------
+        # CACHING (Exact-match prototype)
+        # ----------------------------
+        @staticmethod
+        def _normalize_query(text: str) -> str:
+            """Normalize query for exact-match caching: lowercase, strip punctuation, collapse whitespace."""
+            import string
+            if not text:
+                return ""
+            t = text.lower()
+            t = t.translate(str.maketrans('', '', string.punctuation))
+            t = re.sub(r"\s+", " ", t).strip()
+            return t
+
+        @staticmethod
+        def _hash_query(normalized: str) -> str:
+            import hashlib
+            return hashlib.sha256(normalized.encode('utf-8')).hexdigest()
+
+        async def _ensure_cache_table(self, db: AsyncSession) -> None:
+            """Create cache table if not exists (prototype fallback)."""
+            sql = text("""
+            CREATE TABLE IF NOT EXISTS chatbot_cache (
+                id uuid PRIMARY KEY,
+                query_hash varchar(128) UNIQUE,
+                query_normalized text,
+                answer jsonb,
+                hit_count integer DEFAULT 0,
+                created_at timestamptz DEFAULT now(),
+                updated_at timestamptz DEFAULT now()
+            )
+            """)
+            await db.execute(sql)
+            await db.commit()
+
+        async def _get_cached_answer(self, db: AsyncSession, qhash: str) -> dict | None:
+            if not settings.CACHE_ENABLED:
+                return None
+            row = await db.execute(text("SELECT id, answer, hit_count FROM chatbot_cache WHERE query_hash = :qhash"), {"qhash": qhash})
+            res = row.fetchone()
+            if not res:
+                return None
+            await db.execute(text("UPDATE chatbot_cache SET hit_count = hit_count + 1, updated_at = now() WHERE id = :id"), {"id": str(res.id)})
+            await db.commit()
+            return res.answer
+
+        async def _save_cache(self, db: AsyncSession, qhash: str, normalized: str, answer_obj: dict) -> None:
+            if not settings.CACHE_ENABLED:
+                return
+            await self._ensure_cache_table(db)
+            await db.execute(
+                text("""
+                INSERT INTO chatbot_cache (id, query_hash, query_normalized, answer, created_at, updated_at)
+                VALUES (:id, :qhash, :normalized, :answer::jsonb, now(), now())
+                ON CONFLICT (query_hash) DO UPDATE SET answer = EXCLUDED.answer, updated_at = now()
+                """),
+                {
+                    "id": str(uuid4()),
+                    "qhash": qhash,
+                    "normalized": normalized,
+                    "answer": json.dumps(answer_obj),
+                }
+            )
+            await db.commit()
+
+        restriction_note = ""
+        if has_tourism_intent and (is_out_of_scope or is_irrelevant):
+            restriction_note = (
+                "\n\n **Catatan:** Saya hanya bisa membantu topik wisata, kuliner, dan tempat nongkrong di Ciayumajakuning. "
+                "Permintaan lain di luar konteks itu tidak bisa saya bantu."
+            )
+
+        if is_out_of_scope and not has_tourism_intent:
+            # Non-tourism out-of-scope requests -> reject
+            found = next((k for k in out_of_scope_keywords if k in user_part), None)
+            found_text = f" terkait {found}" if found else ""
+            return f" **Maaf ya, jangkauan informasi SITA saat ini terbatas di wilayah Ciayumajakuning saja.{found_text}**\n\nSITA belum bisa memberikan informasi untuk tempat di luar Cirebon, Indramayu, Majalengka, dan Kuningan. Silakan tanya SITA tentang destinasi di wilayah tersebut ya!"
+
+        if is_irrelevant and not has_tourism_intent:
             return f" **Maaf banget! SITA hanya bisa menjawab pertanyaan seputar pariwisata, kuliner, dan tempat nongkrong.**\n\nSITA tidak dilatih untuk menjawab topik di luar Ciayumajakuning atau topik umum lainnya. Yuk, tanya SITA tentang rekomendasi liburan saja!"
 
         # --- 2. DETEKSI IDENTITAS & SAPAAN ---
-        if any(k in user_part for k in ["siapa kamu", "nama kamu", "siapa dirimu", "apa itu sita", "kamu siapa"]):
-            return "Halo! Saya **SITA** (Smart Informasi Turisme Asisten), asisten virtual pariwisata Ciayumajakuning. Saya bisa bantu kamu cari info wisata, kuliner, atau tempat nongkrong keren!"
-        
         # C. Cek Intent Lokasi/Alamat/Terdekat
         is_asking_location = any(k in user_part for k in ["dimana", "lokasi", "alamat", "rute", "posisi", "daerah mana"])
         is_asking_nearby = "terdekat" in user_part
         is_asking_price = any(k in user_part for k in ["harga", "biaya", "tiket", "bayar"])
 
-        if any(k in user_part for k in ["halo", "hai", "pagi", "siang", "sore", "malam"]):
+        if any(k in user_part for k in ["halo", "hai", "pagi", "siang", "sore", "malam"]) and not has_tourism_intent and not docs:
             return f"Halo! Ada yang bisa SITA bantu di {wilayah}? Saya punya banyak info tempat wisata, kuliner, dan cafe lokal lho."
 
         elif docs:
@@ -869,7 +1176,7 @@ class ChatbotService:
         # Tambahkan Contoh Pertanyaan Relevan di akhir (sesuai wilayah aktif)
         suggestions = ChatbotService._build_relevant_followup_suggestions(wilayah)
 
-        return f"""{header}
+        final_answer = f"""{header}
 
 {items_text}
 
@@ -878,6 +1185,11 @@ class ChatbotService:
 {suggestions}
 
 Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
+
+        if restriction_note and has_tourism_intent:
+            return final_answer + restriction_note
+
+        return final_answer
 
 
     # ========================================================================
@@ -893,6 +1205,23 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
         import re
         
         msg_lower = re.sub(r'[^\w\s]', '', message).lower()
+
+        # === CHECK 1: Deteksi lokasi yang menyebut provinsi/kota di luar Ciayumajakuning ===
+        extracted_locations = _extract_locations_from_text(message)
+        unsupported_locations = [loc for loc in extracted_locations if not _is_location_in_supported_region(loc)]
+        
+        if unsupported_locations:
+            first_unsupported = list(unsupported_locations)[0]
+            logger.warning(f"Query rejected: unsupported location detected: {first_unsupported}")
+            return (
+                " **Maaf, jangkauan informasi SITA terbatas di wilayah Ciayumajakuning.**\n\n"
+                f"Pertanyaan kamu menyebut lokasi di luar cakupan SITA (yaitu {first_unsupported}). "
+                f"SITA hanya bisa memberikan rekomendasi untuk daerah Cirebon, Indramayu, Majalengka, dan Kuningan.\n\n"
+                "Coba tanya:\n"
+                "- \"Wisata alam di Kuningan\"\n"
+                "- \"Pantai terbaik di Indramayu\"\n"
+                "- \"Kuliner legendaris Cirebon\""
+            )
 
         # Konten berbahaya / ilegal  HARUS ditolak
         dangerous_keywords = [
@@ -918,15 +1247,6 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
             "resep masak",  # bukan rekomendasi tempat makan
             "cara menulis", "cara membuat essay", "cara presentasi",
             "translate", "terjemahkan",
-        ]
-
-        # Lokasi di luar Ciayumajakuning
-        out_of_scope_locations = [
-            "jakarta", "bandung", "jogja", "yogyakarta", "bali", "lombok",
-            "surabaya", "semarang", "malang", "labuan bajo", "raja ampat",
-            "medan", "makassar", "manado", "singapura", "malaysia", "thailand",
-            "monas", "borobudur", "prambanan", "tanah lot", "kuta",
-            "solo", "semarang", "palembang", "pontianak", "balikpapan",
         ]
 
         # Check dangerous content
@@ -959,86 +1279,106 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
                     "Ada yang bisa SITA bantu?"
                 )
 
-        # Check out-of-scope locations (tapi hanya jika TIDAK menyebut Ciayumajakuning)
-        mentions_ciayumajakuning = any(
-            w in msg_lower for w in ["cirebon", "indramayu", "majalengka", "kuningan", "ciayumajakuning"]
-        )
-        if not mentions_ciayumajakuning:
-            for keyword in out_of_scope_locations:
-                if keyword in msg_lower:
-                    return (
-                        " **Maaf, jangkauan informasi SITA terbatas di wilayah Ciayumajakuning.**\n\n"
-                        "SITA hanya bisa memberikan rekomendasi untuk daerah Cirebon, Indramayu, "
-                        "Majalengka, dan Kuningan. Untuk destinasi di luar wilayah tersebut, "
-                        "SITA belum punya datanya.\n\n"
-                        " Tapi kalau mau explore Ciayumajakuning, SITA punya banyak rekomendasi!\n"
-                        "- \"Wisata alam di Kuningan\"\n"
-                        "- \"Pantai terbaik di Indramayu\"\n"
-                        "- \"Kuliner legendaris Cirebon\"\n\n"
-                        "Mau coba tanya yang mana?"
-                    )
-
         return None  # Aman, lanjut proses
 
     # ========================================================================
     # Metode Utama (Menggunakan Subtask 2 & 3)
     # ========================================================================
 
-    async def ask(self, payload: ChatRequest, db: AsyncSession, user_id: str | None = None) -> ChatResponse:
+    async def _build_and_save_response(
+        self, payload: ChatRequest, db: AsyncSession, answer: str,
+        wilayah: str | None, referensi: list, user_id: str | None = None,
+        docs: list = None, debug: bool = False,
+    ) -> ChatResponse:
+        """Helper: create/get session, save messages, return ChatResponse."""
+        session_data = await self.get_or_create_session(
+            session_token=payload.session_token, db=db,
+            latitude=payload.latitude, longitude=payload.longitude,
+            wilayah=wilayah, user_id=user_id,
+        )
+        session_token = session_data["session_token"]
+        history = session_data["messages"]
+
+        messages = list(history)
+        messages.append({"role": "user", "content": payload.message, "timestamp": self._timestamp()})
+        messages.append({"role": "assistant", "content": answer, "timestamp": self._timestamp()})
+
+        wilayah_to_save = wilayah if wilayah in self.WILAYAH_LIST else None
+        await self.save_session(token=session_token, messages=messages, wilayah=wilayah_to_save, db=db)
+
+        retrieved_docs = None
+        if (debug or getattr(payload, 'debug', False)) and docs:
+            try:
+                retrieved_docs = [self._row_to_dict(d) for d in docs]
+            except Exception:
+                pass
+
+        return ChatResponse(
+            session_token=session_token, answer=answer,
+            wilayah_terdeteksi=wilayah, referensi=referensi,
+            messages_count=len(messages), retrieved_docs=retrieved_docs,
+        )
+
+    async def ask(self, payload: ChatRequest, db: AsyncSession, user_id: str | None = None, debug: bool = False) -> ChatResponse:
         """
-        Method ask yang sudah direfactor menggunakan fungsi Subtask 2 & 3.
+        Method ask utama dengan arsitektur Intent-First:
+        1. Classify intent (deterministic, tanpa LLM)
+        2. Route: static intents → static response (TANPA hit DB)
+        3. Route: recommendation/info → RAG pipeline
         """
-        # 0. Content Safety Check  tolak pertanyaan berbahaya/di luar konteks
-        rejection = self._check_content_safety(payload.message)
-        if rejection:
-            # Tetap simpan ke session tapi jawab dengan penolakan halus
-            session_data = await self.get_or_create_session(
-                session_token=payload.session_token,
-                db=db,
-                latitude=payload.latitude,
-                longitude=payload.longitude,
-                wilayah=self.detect_wilayah_from_text(payload.message) or "Indramayu",
-                user_id=user_id,
-            )
-            session_token = session_data["session_token"]
-            history = session_data["messages"]
-            
-            messages = list(history)
-            messages.extend([
-                {"role": "user", "content": payload.message, "timestamp": self._timestamp()},
-                {"role": "assistant", "content": rejection, "timestamp": self._timestamp()},
-            ])
-            await self.save_session(token=session_token, messages=messages, wilayah=session_data.get("wilayah_terdeteksi"), db=db)
-            
-            return ChatResponse(
-                session_token=session_token,
-                answer=rejection,
-                wilayah_terdeteksi=session_data.get("wilayah_terdeteksi"),
-                referensi=[],
-                messages_count=len(messages),
+        # ═══════════════════════════════════════════════════════
+        # STEP 1: Intent Classification (SEBELUM apapun)
+        # ═══════════════════════════════════════════════════════
+        intent_result = classify_intent(payload.message)
+        intent = intent_result["intent"]
+        matched_kw = intent_result.get("matched_keyword")
+
+        logger.info(f"Intent classified: {intent} (keyword: {matched_kw})")
+
+        # ═══════════════════════════════════════════════════════
+        # STEP 2: Route static intents (NO DB access)
+        # ═══════════════════════════════════════════════════════
+        STATIC_INTENT_MAP = {
+            "identity": get_identity_response,
+            "greeting": get_greeting_response,
+            "thanks": get_thanks_response,
+            "farewell": get_farewell_response,
+            "dangerous": get_dangerous_content_response,
+            "unknown": get_unknown_intent_response,
+        }
+
+        if intent in STATIC_INTENT_MAP:
+            answer = STATIC_INTENT_MAP[intent]()
+            return await self._build_and_save_response(
+                payload, db, answer, wilayah=None, referensi=[], user_id=user_id,
             )
 
-        # 1. Deteksi wilayah dari text (Subtask 3)
+        if intent == "out_of_scope_location":
+            answer = get_out_of_scope_location_response(matched_kw)
+            return await self._build_and_save_response(
+                payload, db, answer, wilayah=None, referensi=[], user_id=user_id,
+            )
+
+        if intent == "out_of_scope_topic":
+            answer = get_out_of_scope_topic_response(matched_kw)
+            return await self._build_and_save_response(
+                payload, db, answer, wilayah=None, referensi=[], user_id=user_id,
+            )
+
+        # ═══════════════════════════════════════════════════════
+        # STEP 3: Wilayah detection (only for recommendation/info_specific)
+        # ═══════════════════════════════════════════════════════
         wilayah_text = self.detect_wilayah_from_text(payload.message)
-        
-        # 2. Deteksi wilayah dari koordinat (jika ada) (Subtask 3)
         wilayah_geo = None
         if payload.latitude and payload.longitude:
             wilayah_geo = self.nearest_wilayah(payload.latitude, payload.longitude)
-        
-        # 3. Tentukan wilayah filter untuk query
-        # Jika user sebut "ciayumajakuning" atau tidak sebut wilayah spesifik  None (semua wilayah)
+
         msg_lower = payload.message.lower()
         is_all_region = "ciayumajakuning" in msg_lower or "ciayumajakung" in msg_lower
-        
-        # Hitung berapa wilayah yang disebut
-        mentioned_wilayah = []
-        for w in ["cirebon", "indramayu", "majalengka", "kuningan"]:
-            if w in msg_lower:
-                mentioned_wilayah.append(w.capitalize())
-        
+
+        mentioned_wilayah = [w.capitalize() for w in ["cirebon", "indramayu", "majalengka", "kuningan"] if w in msg_lower]
+
         if is_all_region or len(mentioned_wilayah) > 1:
-            # Multi-wilayah atau ciayumajakuning  jangan filter, ambil dari semua
             wilayah_filter = None
             wilayah = "Ciayumajakuning"
         elif len(mentioned_wilayah) == 1:
@@ -1051,101 +1391,95 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
             wilayah_filter = wilayah_geo
             wilayah = wilayah_geo
         else:
-            # Tidak ada info wilayah sama sekali  ambil semua
             wilayah_filter = None
             wilayah = "Ciayumajakuning"
-        
-        # 4. Get or create session (Subtask 3)
-        session_data = await self.get_or_create_session(
-            session_token=payload.session_token,
-            db=db,
-            latitude=payload.latitude,
-            longitude=payload.longitude,
-            wilayah=wilayah,
-            user_id=user_id,
-        )
-        
-        session_token = session_data["session_token"]
-        history = session_data["messages"]
 
-        # 4.1 Parse budget range dari teks user (jika ada)
+        # ═══════════════════════════════════════════════════════
+        # STEP 4: Budget parsing
+        # ═══════════════════════════════════════════════════════
         budget_min, budget_max = self.parse_budget_range_from_text(payload.message)
-        
-        # 5. RAG Pipeline (Subtask 2)
+
+        # ═══════════════════════════════════════════════════════
+        # STEP 5: Cache check
+        # ═══════════════════════════════════════════════════════
+        normalized = self._normalize_query(payload.message)
+        qhash = self._hash_query(normalized)
+        if settings.CACHE_ENABLED:
+            cached = await self._get_cached_answer(db, qhash)
+            if cached:
+                c_answer = cached.get("answer") if isinstance(cached, dict) else cached["answer"]
+                c_wilayah = (cached.get("wilayah_terdeteksi") if isinstance(cached, dict) else None) or wilayah
+                c_ref = (cached.get("referensi") if isinstance(cached, dict) else None) or []
+                return await self._build_and_save_response(
+                    payload, db, c_answer, wilayah=c_wilayah, referensi=c_ref, user_id=user_id,
+                )
+
+        # ═══════════════════════════════════════════════════════
+        # STEP 6: RAG Pipeline (recommendation / info_specific / planning)
+        # ═══════════════════════════════════════════════════════
+        is_planning = (intent == "planning")
+        top_k_val = 15 if is_planning else 5
         docs = await self.retrieve_from_db(
-            db=db, 
-            user_message=payload.message, 
-            wilayah_filter=wilayah_filter,
-            top_k=5,
-            lat=payload.latitude,
-            lng=payload.longitude,
-            budget_min=budget_min,
-            budget_max=budget_max,
+            db=db, user_message=payload.message,
+            wilayah_filter=wilayah_filter, top_k=top_k_val,
+            lat=payload.latitude, lng=payload.longitude,
+            budget_min=budget_min, budget_max=budget_max,
+            is_planning=is_planning,
         )
-        context = self.build_context(docs)
-        
+
+        context = self.build_context(docs) if docs else ""
+        session_data = await self.get_or_create_session(
+            session_token=payload.session_token, db=db,
+            latitude=payload.latitude, longitude=payload.longitude,
+            wilayah=wilayah, user_id=user_id,
+        )
         prompt = self.build_prompt(
             user_message=payload.message,
             context=context,
-            history=history,
+            history=session_data["messages"],
             wilayah=wilayah,
             latitude=payload.latitude,
             longitude=payload.longitude
         )
-        
         answer = await self._generate_gemini_response(prompt, docs)
-        if not self._is_answer_grounded(answer, docs, wilayah_filter):
-            answer = self._build_grounded_answer(
-                docs=docs,
-                wilayah=wilayah_filter or wilayah,
-                budget_min=budget_min,
-                budget_max=budget_max,
-            )
         
-        # 5. Simpan message ke history
-        user_message_dict = {
-            "role": "user",
-            "content": payload.message,
-            "timestamp": self._timestamp(),
-        }
-        assistant_message = {
-            "role": "assistant",
-            "content": answer,
-            "timestamp": self._timestamp(),
-        }
-        
-        messages = list(history)
-        messages.extend([user_message_dict, assistant_message])
-        
-        # 6. Save session menggunakan fungsi baru (Subtask 3)
-        # wilayah_terdeteksi di DB pakai enum, hanya boleh: Indramayu/Cirebon/Majalengka/Kuningan
-        wilayah_to_save = wilayah if wilayah in ("Indramayu", "Cirebon", "Majalengka", "Kuningan") else None
-        await self.save_session(
-            token=session_token,
-            messages=messages,
-            wilayah=wilayah_to_save,
-            db=db
-        )
-        
-        # 7. Siapkan referensi
+        # Fallback jika LLM gagal total
+        if not answer:
+            if docs:
+                answer = self._build_grounded_answer(docs, wilayah, budget_min, budget_max)
+            else:
+                answer = get_no_data_response(wilayah)
+
+        # Siapkan referensi yang benar-benar disebutkan oleh LLM
         referensi = []
-        if docs:
-            referensi = [
-                {
-                    "nama": d.nama,
+        if docs and answer:
+            # Cari doc yang namanya ada di dalam answer
+            mentioned_docs = [d for d in docs if (d.nama and d.nama.lower() in answer.lower())]
+            
+            # Jika tidak ada yang match (misal nama disingkat oleh LLM), gunakan top 5
+            if not mentioned_docs:
+                mentioned_docs = docs[:5]
+                
+            # Batasi maksimal 7 referensi
+            for d in mentioned_docs[:7]:
+                referensi.append({
+                    "nama": getattr(d, 'nama', '-'),
                     "tipe": getattr(d, 'tipe', 'wisata'),
                     "wilayah": getattr(d, 'wilayah', ''),
                     "link_maps": getattr(d, 'link_google_maps', None),
-                } 
-                for d in docs[:3]
-            ]
-        
-        return ChatResponse(
-            session_token=session_token,
-            answer=answer,
-            wilayah_terdeteksi=wilayah,
-            referensi=referensi,
-            messages_count=len(messages),
+                })
+
+        # Save to cache
+        try:
+            await self._save_cache(db, qhash, normalized, {
+                "answer": answer, "wilayah_terdeteksi": wilayah, "referensi": referensi,
+            })
+        except Exception:
+            pass
+
+        return await self._build_and_save_response(
+            payload, db, answer, wilayah=wilayah, referensi=referensi,
+            user_id=user_id, docs=docs, debug=debug,
         )
 
     @staticmethod

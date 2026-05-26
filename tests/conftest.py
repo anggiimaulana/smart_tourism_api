@@ -9,7 +9,9 @@ from sqlalchemy.pool import NullPool
 
 from app.main import app
 from app.core.database import get_db, Base
+from app.core.config import settings
 from app.core.security import create_access_token, hash_password
+from app.services.chatbot_service import ChatbotService
 from app.models.user import User
  
 # Gunakan database test terpisah (jangan pakai DB development!)
@@ -37,13 +39,49 @@ async def db_session(test_engine):
     async with TestSession() as session:
         yield session
         await session.rollback()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def mock_chatbot_retrieval(monkeypatch):
+    """Hindari ketergantungan ke view v_all_tempat di suite test HTTP.
+
+    Test unit chatbot yang butuh perilaku retrieve bisa tetap override sendiri via monkeypatch.
+    """
+    settings.CACHE_ENABLED = False
+
+    async def fake_retrieve_from_db(*args, **kwargs):
+        doc = type("Doc", (), {})()
+        doc.nama = "Mock Wisata Ciayumajakuning"
+        doc.wilayah = "Cirebon"
+        doc.tipe = "wisata"
+        doc.link_google_maps = "https://maps.example/mock"
+        doc.harga_min = 0
+        doc.harga_max = 0
+        doc._mapping = {
+            "nama": doc.nama,
+            "wilayah": doc.wilayah,
+            "tipe": doc.tipe,
+            "link_google_maps": doc.link_google_maps,
+            "harga_min": doc.harga_min,
+            "harga_max": doc.harga_max,
+        }
+        return [doc]
+
+    monkeypatch.setattr(ChatbotService, "retrieve_from_db", fake_retrieve_from_db)
+    yield
  
  
 @pytest_asyncio.fixture
-async def client(db_session: AsyncSession):
-    """HTTP test client dengan DB session yang sudah di-override."""
+async def client(test_engine):
+    """HTTP test client dengan DB session baru untuk setiap request."""
+    TestSession = sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+
     async def override_get_db():
-        yield db_session
+        async with TestSession() as session:
+            try:
+                yield session
+            finally:
+                await session.close()
  
     app.dependency_overrides[get_db] = override_get_db
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:

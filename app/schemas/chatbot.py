@@ -7,6 +7,7 @@ class ChatRequest(BaseModel):
     session_token: Optional[str]   = None
     latitude:      Optional[float] = None
     longitude:     Optional[float] = None
+    debug:         Optional[bool]   = False
  
     @field_validator("message")
     @classmethod
@@ -52,6 +53,8 @@ class ChatResponse(BaseModel):
     wilayah_terdeteksi: Optional[str]        = None
     referensi:          List[ChatReferensi]  = []
     messages_count:     int                  = 0
+    # Optional debug output (only present when client requests debug=True)
+    retrieved_docs:     Optional[List[dict]] = None
  
  
 class ChatHistoryResponse(BaseModel):

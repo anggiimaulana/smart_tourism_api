@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.database import engine, Base
+from app.services.chatbot_service import get_llm_runtime_status
 
 # Import semua model agar SQLAlchemy tahu tabel mana saja yang perlu dibuat
 import app.models  # noqa: F401
@@ -23,6 +24,16 @@ async def lifespan(app: FastAPI):
     if settings.DEBUG:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+    import logging
+    logger = logging.getLogger(__name__)
+    llm_status = get_llm_runtime_status()
+    logger.info(
+        "LLM startup status: gemini=%s groq=%s enabled=%s provider=%s",
+        llm_status["gemini_enabled"],
+        llm_status["groq_enabled"],
+        llm_status["llm_enabled"],
+        llm_status["provider"],
+    )
     yield
 
 # ── Inisialisasi App ──────────────────────────────────────────
@@ -120,6 +131,7 @@ async def global_exception_handler(request: Request, exc: Exception):
             "success": False,
             "message": error_msg,
             "data": None,
+            "traceback": traceback.format_exc() if settings.DEBUG else None
         },
     )
 

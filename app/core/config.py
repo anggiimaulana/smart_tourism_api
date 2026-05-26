@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     RAG_TOP_K:    int   = 5     # jumlah dokumen yang di-retrieve per query
     RAG_MIN_SCORE: float = 0.01  # minimum ts_rank agar dokumen lolos
 
+    # ── Cache Settings ────────────────────────────────────────
+    CACHE_ENABLED: bool = True
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 

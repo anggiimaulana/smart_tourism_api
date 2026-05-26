@@ -51,6 +51,7 @@ async def get_summary_all(
 @router.post(
     "/sync/{tipe_tempat}/{kode}",
     response_model=BaseResponse,
+    status_code=201,
     summary="[Admin] Sinkronisasi label sentimen ke tabel utama",
     dependencies=[Depends(require_admin)],
     description="""
@@ -73,6 +74,7 @@ async def sync_sentimen(
 @router.post(
     "/sync-all",
     response_model=BaseResponse,
+    status_code=201,
     summary="[Admin] Sinkronisasi SEMUA label sentimen",
     dependencies=[Depends(require_admin)],
 )
