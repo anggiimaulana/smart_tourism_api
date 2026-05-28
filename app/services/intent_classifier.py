@@ -117,6 +117,7 @@ IRRELEVANT_TOPICS = [
     "baju", "sepatu", "buku", "obat", "sakit", "rumah sakit",
     "perpustakaan", "sekolah", "kampus", "universitas", "kuliah",
     "pinjol", "pinjaman online", "investasi bodong",
+    "pinjam uang", "pinjam duit", "butuh uang", "dana gaib", "pinjem uang",
     "jodoh", "pacar", "mantan", "selingkuh", "nikah",
     "berita terkini", "gosip artis", "selebriti",
     "resep masak", "cara memasak",
@@ -126,6 +127,8 @@ IRRELEVANT_TOPICS = [
     "soekarno", "hatta", "isi dari", "sebutkan isi",
     "sistem atm", "atm sederhana",
 ]
+
+
 
 # --- Location: Indonesian provinces & major cities OUTSIDE Ciayumajakuning ---
 OUT_OF_SCOPE_PROVINCES = {
@@ -324,8 +327,8 @@ def classify_intent(message: str) -> dict:
     Returns:
         dict with keys:
         - intent: str (identity|greeting|thanks|farewell|recommendation|
-                       info_specific|out_of_scope_location|out_of_scope_topic|
-                       dangerous|unknown)
+        info_specific|out_of_scope_location|out_of_scope_topic|
+        dangerous|unknown)
         - matched_keyword: str | None
         - has_tourism_intent: bool
         - detected_location_issue: str | None
@@ -333,29 +336,39 @@ def classify_intent(message: str) -> dict:
     normalized = _normalize_text(message)
     
     result = {
-        "intent": "unknown",
+        "intent": "conversational",
         "matched_keyword": None,
         "has_tourism_intent": False,
         "detected_location_issue": None,
     }
 
+    # ═══════════════════════════════════════════════════════
+    # TAMBAHKAN PERBAIKAN DI SINI (CEGAT OPERASI MATEMATIKA / ANGKA)
+    # ═══════════════════════════════════════════════════════
+    # Jika input mentah hanya berisi angka, spasi, dan simbol matematika dasar (+, -, *, /, =, x, ?)
+    if re.match(r'^[0-9\s\+\-\*\/\=\?xX]+$', message.strip()):
+        result["intent"] = "out_of_scope_topic"
+        result["matched_keyword"] = "operasi_matematika"
+        return result
+    # ═══════════════════════════════════════════════════════
+
     has_supported = _has_supported_region(normalized)
     
     # Check tourism intent (used for compound queries)
-    has_tourism = _text_contains_any(normalized, TOURISM_KEYWORDS) is not None
-    result["has_tourism_intent"] = has_tourism
+    has_tourism = any(kw in normalized for kw in TOURISM_KEYWORDS)
     
-    # === PRIORITY 1: Dangerous content ===
+    
+    # === PRIORITY 1: Dangerous Keywords (Paling Atas) ===
     match = _text_contains_any(normalized, DANGEROUS_KEYWORDS)
     if match:
         result["intent"] = "dangerous"
         result["matched_keyword"] = match
         return result
-    
-    # === PRIORITY 2: Identity questions ===
-    match = _text_contains_any(normalized, IDENTITY_KEYWORDS)
+
+    # === PRIORITY 2: Out of Scope Topic (Finansial, Tugas Sekolah, Politik) ===
+    match = _text_contains_any(normalized, IRRELEVANT_TOPICS)
     if match:
-        result["intent"] = "identity"
+        result["intent"] = "out_of_scope_topic"
         result["matched_keyword"] = match
         return result
     
@@ -427,7 +440,7 @@ def classify_intent(message: str) -> dict:
     
     # === PRIORITY 10: Valid recommendation ===
     if has_tourism:
-        result["intent"] = "recommendation"
+        result["intent"] = "unknown"
         result["matched_keyword"] = _text_contains_any(normalized, TOURISM_KEYWORDS)
         return result
     
