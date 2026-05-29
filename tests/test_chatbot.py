@@ -44,7 +44,8 @@ async def test_chatbot_continue_session(client: AsyncClient):
         "message": "Yang murah berapa harganya?",
         "session_token": token
     })
-    assert second.status_code == 201
+    # Memilih status 200 karena ini adalah sesi lanjutan (bukan pembuatan sesi baru)
+    assert second.status_code == 200
     assert second.json()["data"]["messages_count"] == 4  # 2 user + 2 assistant
 
 

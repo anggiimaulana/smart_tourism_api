@@ -449,10 +449,19 @@ class ChatbotService:
             
         # Buat query string dengan OR operator untuk FTS
         if filtered_words:
-            query_str = " | ".join(filtered_words)
-            if is_planning:
-                query_str += " | wisata | kuliner | nongkrong"
+            # Gunakan regex untuk memastikan hanya mengambil kata kunci yang valid alfanumerik
+            valid_words = [re.sub(r'[^\w]', '', w) for w in filtered_words if re.sub(r'[^\w]', '', w)]
+            if valid_words:
+                query_str = " | ".join(valid_words)
+                if is_planning:
+                    query_str += " | wisata | kuliner | nongkrong"
+            else:
+                query_str = "wisata | kuliner | nongkrong"
         else:
+            query_str = "wisata | kuliner | nongkrong"
+            
+        # Double check: jika query_str ternyata kosong atau bermasalah karena glitch karakter
+        if not query_str.strip() or query_str.strip() == "|":
             query_str = "wisata | kuliner | nongkrong"
 
         # Tentukan kolom order (default ranking FTS)
@@ -460,7 +469,8 @@ class ChatbotService:
         distance_col = ""
         
         # Jika ada koordinat, gunakan formula Haversine untuk hitung jarak (dalam KM)
-        if lat is not None and lng is not None:
+        # Pastikan koordinat bukan (0,0) yang biasanya merupakan error default GPS
+        if lat is not None and lng is not None and (lat != 0.0 or lng != 0.0):
             distance_col = f""", 
                 (6371 * acos(
                     cos(radians({lat})) * cos(radians(latitude)) * 
@@ -834,26 +844,50 @@ class ChatbotService:
         return "\n".join(lines)
 
     @classmethod
-    def _is_answer_grounded(cls, answer: str, docs: list, wilayah_filter: str | None) -> bool:
-        """Validasi ringan agar jawaban tidak keluar konteks dokumen/wilayah."""
+    def _is_answer_grounded(cls, answer: str, docs: list, wilayah_filter: str | None) -> bool:  
+        """
+        Validasi jawaban LLM agar tetap terikat pada konteks DB & wilayah target.
+        Return False jika terdeteksi halusinasi, keluar wilayah, atau mengklaim data palsu.
+        """
         if not answer:
             return False
 
         lowered = answer.lower()
-        if docs:
-            allowed_names = {
-                (cls._row_to_dict(doc).get("nama") or "").lower().strip()
-                for doc in docs[:5]
-            }
-            allowed_names = {n for n in allowed_names if n}
-            if allowed_names and not any(n in lowered for n in allowed_names):
-                return False
 
+        # 1. Toleransi untuk jawaban penolakan/data kosong (tidak dianggap halusinasi)
+        if any(phrase in lowered for phrase in [
+            "maaf", "tidak ditemukan", "belum tersedia", "data belum ada", 
+            "coba tanyakan", "belum bisa membantu"
+        ]):
+            return True
+
+        # 2. Grounding ke nama tempat dari DB
+        if docs:
+            doc_names = {
+                (cls._row_to_dict(d).get("nama") or "").lower().strip() 
+                for d in docs[:5]
+            }
+            doc_names = {n for n in doc_names if n}
+            
+            if doc_names:
+                # Cek apakah LLM menyebutkan setidaknya SATU nama dari konteks
+                # Toleransi: cek substring (LLM biasanya menyebut nama lengkap/paruh)
+                has_mention = any(name in lowered for name in doc_names)
+                
+                # Jika DB punya data tapi LLM tidak menyebut satupun, 
+                # kemungkinan halusinasi atau jawaban terlalu umum -> fallback ke deterministic
+                if not has_mention:
+                    return False
+
+        # 3. Strict Region Scope (Anti Cross-Wilayah)
         if wilayah_filter and wilayah_filter in cls.WILAYAH_LIST:
+            target = wilayah_filter.lower()
             for wilayah in cls.WILAYAH_LIST:
-                if wilayah == wilayah_filter:
+                if wilayah.lower() == target:
                     continue
-                if wilayah.lower() in lowered:
+                # Hindari false positive jika kata wilayah muncul di tengah kata lain
+                # Gunakan pengecekan dengan spasi atau akhir string untuk akurasi
+                if f" {wilayah.lower()} " in lowered or lowered.endswith(f" {wilayah.lower()}"):
                     return False
 
         return True
@@ -995,6 +1029,7 @@ class ChatbotService:
             "proklamasi", "pancasila", "sejarah indonesia", "kemerdekaan", "soekarno", "hatta",
             "flutter", "dart", "php", "golang", "typescript", "react", "laravel", "mysql", "postgresql",
             "nodejs", "html", "css", "javascript", "python", "kode program", "sistem atm", "atm sederhana",
+            "pinjam uang", "pinjol", "dana gaib", "Butuh uang","pinjam duit"
         ]
 
         is_out_of_scope = any(k in user_part for k in out_of_scope_keywords)
@@ -1261,8 +1296,19 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
         2. Route: static intents → static response (TANPA hit DB)
         3. Route: recommendation/info → RAG pipeline
         """
+        """
+        Method ask utama dengan arsitektur Intent-First
+        """
         # ═══════════════════════════════════════════════════════
-        # STEP 1: Intent Classification (SEBELUM apapun)
+        # TAMBAHKAN PERBAIKAN DI SINI (Paling Atas)
+        # ═══════════════════════════════════════════════════════
+        safety_rejection = self._check_content_safety(payload.message)
+        if safety_rejection:
+            return await self._build_and_save_response(
+                payload, db, safety_rejection, wilayah=None, referensi=[], user_id=user_id,
+            )
+        # ═══════════════════════════════════════════════════════
+        # STEP 1: Intent Classification 
         # ═══════════════════════════════════════════════════════
         intent_result = classify_intent(payload.message)
         intent = intent_result["intent"]
@@ -1379,7 +1425,13 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
         answer = await self._generate_gemini_response(prompt, docs)
         
         # Fallback jika LLM gagal total
-        if not answer:
+        if answer:
+            # Cek apakah jawaban LLM sesuai konteks DB & wilayah
+            if docs and not self._is_answer_grounded(answer, docs, wilayah_filter):
+                logger.warning("⚠️ LLM answer failed grounding check. Switching to deterministic fallback.")
+                answer = self._build_grounded_answer(docs, wilayah, budget_min, budget_max)
+        else:
+        # LLM benar-benar gagal/kosong
             if docs:
                 answer = self._build_grounded_answer(docs, wilayah, budget_min, budget_max)
             else:
