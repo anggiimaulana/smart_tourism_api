@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 import pytest
 from httpx import AsyncClient
  
@@ -44,3 +45,5 @@ async def test_chatbot_continue_session(client: AsyncClient):
     })
     assert second.status_code == 200
     assert second.json()["data"]["messages_count"] == 4  # 2 user + 2 assistant
+=======
+>>>>>>> Stashed changes
