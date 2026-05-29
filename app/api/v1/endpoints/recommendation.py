@@ -19,6 +19,7 @@ router = APIRouter()
 @router.post(
     "/",
     response_model=BaseResponse,
+    status_code=201,
     summary="Dapatkan rekomendasi wisata personal",
     description="""
     Mengembalikan hingga 10 rekomendasi tempat berdasarkan strategi berlapis:
@@ -49,6 +50,7 @@ async def get_recommendations(
 @router.post(
     "/planning",
     response_model=BaseResponse,
+    status_code=201,
     summary="Buat itinerary wisata otomatis",
     description="""
     Menghasilkan rencana wisata per hari berdasarkan:
@@ -76,6 +78,7 @@ async def create_planning(
 @router.post(
     "/history",
     response_model=BaseResponse,
+    status_code=201,
     summary="Catat interaksi user untuk model rekomendasi",
     description="""
     Dipanggil frontend setiap user melakukan:

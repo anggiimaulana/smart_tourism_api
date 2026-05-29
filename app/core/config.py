@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     APP_NAME:    str = "Smart Tourism Ciayumajakuning API"
     APP_VERSION: str = "1.0.0"
     DEBUG:       bool = True
+    LARAVEL_URL: str = "http://127.0.0.1:8000"
 
     # ── Database ──────────────────────────────────────────────
     # Format: postgresql+asyncpg://USER:PASSWORD@HOST:PORT/DBNAME
@@ -13,7 +14,16 @@ class Settings(BaseSettings):
 
     # ── Gemini ────────────────────────────────────────────────
     # Dapatkan di: https://aistudio.google.com/app/apikey
-    GEMINI_API_KEY: str
+    GEMINI_API_KEY: str = ""
+
+    # ── LLM Provider ─────────────────────────────────────────
+    # Pilih: "gemini" atau "groq"
+    LLM_PROVIDER: str = "gemini"
+
+    # ── Groq ──────────────────────────────────────────────────
+    # Dapatkan di: https://console.groq.com/keys
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL:   str = "compound-beta"
 
     # ── JWT Auth ──────────────────────────────────────────────
     # Generate: python -c "import secrets; print(secrets.token_hex(32))"
@@ -24,6 +34,9 @@ class Settings(BaseSettings):
     # ── RAG Settings ──────────────────────────────────────────
     RAG_TOP_K:    int   = 5     # jumlah dokumen yang di-retrieve per query
     RAG_MIN_SCORE: float = 0.01  # minimum ts_rank agar dokumen lolos
+
+    # ── Cache Settings ────────────────────────────────────────
+    CACHE_ENABLED: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

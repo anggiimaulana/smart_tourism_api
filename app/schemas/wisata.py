@@ -107,6 +107,18 @@ class WisataResponse(WisataBase):
     total_positif:        int                    = 0
     total_negatif:        int                    = 0
  
+    @field_validator("gambar", mode="after")
+    @classmethod
+    def prepend_base_url(cls, v: List[str]) -> List[str]:
+        from app.core.config import settings
+        result = []
+        for img in v:
+            if img and not str(img).startswith("http"):
+                result.append(f"{settings.LARAVEL_URL.rstrip('/')}/storage/{img}")
+            else:
+                result.append(str(img))
+        return result
+ 
     model_config = ConfigDict(from_attributes=True)
  
  

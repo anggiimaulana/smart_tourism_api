@@ -1,6 +1,7 @@
 # app/api/v1/endpoints/chatbot.py
 # PIC: Vanes
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
+from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -14,6 +15,7 @@ router = APIRouter()
 @router.post(
     "/ask",
     response_model=BaseResponse,
+    status_code=201,
     summary="Kirim pesan ke chatbot RAG",
     description="""
     Chatbot menjawab pertanyaan seputar **wisata, kuliner, dan nongkrong**
@@ -34,12 +36,14 @@ router = APIRouter()
 async def ask_chatbot(
     payload: ChatRequest,
     db: AsyncSession = Depends(get_db),
+    user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    debug_info: Optional[bool] = Header(False, alias="X-Debug-Info"),
 ):
     """
     Latitude & longitude opsional — digunakan untuk mendeteksi wilayah terdekat.
     """
     service = ChatbotService()
-    result = await service.ask(payload, db)
+    result = await service.ask(payload, db, user_id=user_id, debug=bool(debug_info or getattr(payload, "debug", False)))
     return BaseResponse(data=result)
 
 

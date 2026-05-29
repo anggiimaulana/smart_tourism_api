@@ -7,6 +7,7 @@ TODO:
 """
 
 from app.models.chatbot_session import ChatbotSession
+from app.models.chatbot_cache import ChatbotCache
 from app.models.kuliner import Kuliner
 from app.models.nongkrong import Nongkrong
 from app.models.planning_wisata import PlanningWisata
@@ -18,6 +19,7 @@ from app.models.wisata import Wisata
  
 __all__ = [
     "ChatbotSession",
+    "ChatbotCache",
     "Kuliner",
     "Nongkrong",
     "PlanningWisata",

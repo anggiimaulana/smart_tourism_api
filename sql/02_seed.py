@@ -65,6 +65,54 @@ def safe_float(val, default=None) -> float | None:
         return default
 
 
+def parse_rating(val, default=None) -> float | None:
+    """
+    Parse rating dari berbagai format yang mungkin ada di Excel:
+    - Float biasa: 4.5 → 4.5
+    - Integer: 4 → 4.0
+    - String dengan koma: "4,5" → 4.5
+    - String dengan double dot (typo): "4..7" → 4.7
+    - Datetime (Excel salah baca "4,5" jadi tanggal 4 Mei):
+      datetime(2026, 5, 4) → 4.5 (hari=rating utuh, bulan=desimal)
+    - String non-numerik ("Belum tersedia") → None
+    """
+    if val is None:
+        return default
+    if isinstance(val, float) and np.isnan(val):
+        return default
+
+    # Handle datetime — Excel menginterpretasi "4,3" sebagai tanggal 4 Maret
+    # Pola: hari = angka bulat rating, bulan = angka desimal
+    if isinstance(val, (datetime, pd.Timestamp)):
+        day = val.day      # angka utuh rating (misal 4)
+        month = val.month  # angka desimal (misal 3 → 0.3)
+        rating = float(f"{day}.{month}")
+        if 0.0 <= rating <= 5.0:
+            return rating
+        return default
+
+    # Konversi ke string untuk parsing
+    s = str(val).strip()
+
+    # Skip string non-numerik
+    if not s or s.lower() in ("nan", "belum tersedia", "-", "n/a", "none"):
+        return default
+
+    # Ganti koma dengan titik (format Indonesia: "4,5" → "4.5")
+    s = s.replace(",", ".")
+
+    # Fix double dot typo: "4..7" → "4.7"
+    s = s.replace("..", ".")
+
+    try:
+        rating = float(s)
+        if 0.0 <= rating <= 5.0:
+            return rating
+        return default
+    except (ValueError, TypeError):
+        return default
+
+
 def safe_bool(val, true_values=("ya", "true", "1", "yes")) -> bool:
     """Konversi string 'Ya'/'Tidak' ke boolean."""
     if val is None or (isinstance(val, float) and np.isnan(val)):
@@ -230,7 +278,7 @@ async def seed_wisata(session: AsyncSession) -> int:
                     "fasilitas":    fasilitas,
                     "aksesibilitas": safe_str(row.get("Aksesibilitas")),
                     "transportasi": safe_str(row.get("Moda_Transportasi")),
-                    "rating":       safe_float(row.get("Rating_Google")),
+                    "rating":       parse_rating(row.get("Rating_Google")),
                     "jumlah_ulasan": safe_int(row.get("Jumlah_Ulasan_Google")),
                     "gmaps":        safe_str(row.get("Link_Google_Maps")),
                     "instagram":    safe_str(row.get("Link_Instagram")),
@@ -320,7 +368,7 @@ async def seed_kuliner(session: AsyncSession) -> tuple[int, int]:
                     "kapasitas":    safe_int(row.get("Kapasitas_Orang")),
                     "fasilitas":    fasilitas,
                     "halal":        safe_bool(row.get("Sertifikat_Halal")),
-                    "rating":       safe_float(row.get("Rating_Google")),
+                    "rating":       parse_rating(row.get("Rating_Google")),
                     "ulasan":       safe_int(row.get("Jumlah_Ulasan_Google")),
                     "gmaps":        safe_str(row.get("Link_Google_Maps")),
                     "kontak":       safe_str(row.get("Kontak")),
@@ -404,7 +452,7 @@ async def seed_nongkrong(session: AsyncSession) -> tuple[int, int]:
                     "kapasitas": safe_int(row.get("Kapasitas_Orang")),
                     "fasilitas": fasilitas,
                     "batas_duduk": safe_str(row.get("Batas_Waktu_Duduk")),
-                    "rating":    safe_float(row.get("Rating_Google")),
+                    "rating":    parse_rating(row.get("Rating_Google")),
                     "min_order": safe_int(row.get("Minimal_Order")),
                     "gmaps":     safe_str(row.get("Link_Google_Maps")),
                     "kontak":    safe_str(row.get("Kontak_HP")),
@@ -443,7 +491,8 @@ async def seed_admin(session: AsyncSession):
     # 2. Buat hash baru menggunakan bcrypt
     pw_plain = "admin123"
     salt = bcrypt.gensalt()
-    pw_hash = bcrypt.hashpw(pw_plain.encode("utf-8"), salt).decode("utf-8")
+    # Python bcrypt menghasilkan $2b$, sedangkan PHP/Laravel menggunakan $2y$. Keduanya identik algoritmanya.
+    pw_hash = bcrypt.hashpw(pw_plain.encode("utf-8"), salt).decode("utf-8").replace("$2b$", "$2y$")
 
     await session.execute(text("""
         INSERT INTO users (nama, email, password_hash, role, is_active)

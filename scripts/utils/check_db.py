@@ -10,7 +10,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 TABLES = [
     "users", "wisata", "kuliner", "nongkrong",
     "sentiment_results", "user_history", "user_preferences",
-    "chatbot_sessions", "planning_wisata",
+    "chatbot_sessions", "chatbot_cache", "planning_wisata",
 ]
 
 

@@ -266,6 +266,21 @@ CREATE INDEX idx_cs_user    ON chatbot_sessions(user_id);
 CREATE INDEX idx_cs_token   ON chatbot_sessions(session_token);
 
 -- ────────────────────────────────────────────────────────────
+-- 8b. CHATBOT CACHE  (exact-match cache untuk jawaban chatbot)
+-- ────────────────────────────────────────────────────────────
+CREATE TABLE chatbot_cache (
+    id                  UUID            PRIMARY KEY,
+    query_hash          VARCHAR(128)    NOT NULL UNIQUE,
+    query_normalized     TEXT            NOT NULL,
+    answer              JSONB           NOT NULL,
+    hit_count           INTEGER         NOT NULL DEFAULT 0,
+    created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_chatbot_cache_query_hash ON chatbot_cache(query_hash);
+
+-- ────────────────────────────────────────────────────────────
 -- 9. PLANNING WISATA  (itinerary yang dibuat user)
 -- ────────────────────────────────────────────────────────────
 CREATE TABLE planning_wisata (
@@ -302,7 +317,7 @@ $$ LANGUAGE plpgsql;
 DO $$
 DECLARE tbl TEXT;
 BEGIN
-    FOREACH tbl IN ARRAY ARRAY['users','wisata','kuliner','nongkrong','chatbot_sessions','planning_wisata','user_preferences']
+    FOREACH tbl IN ARRAY ARRAY['users','wisata','kuliner','nongkrong','chatbot_sessions','chatbot_cache','planning_wisata','user_preferences']
     LOOP
         EXECUTE format(
             'CREATE TRIGGER set_updated_at BEFORE UPDATE ON %I

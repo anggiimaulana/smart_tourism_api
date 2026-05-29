@@ -193,6 +193,12 @@ alembic revision --autogenerate -m "initial schema"
 alembic upgrade head
 ```
 
+Catatan cache chatbot:
+
+- Tabel `chatbot_cache` harus datang dari bootstrap schema atau migration Alembic, bukan dibuat saat request berjalan.
+- Saat `alembic upgrade head`, migration `2c4f7a9b6d10_add_chatbot_cache_table.py` akan membuat tabel tersebut.
+- Saat reset database dengan `python scripts/utils/reset_db.py`, file `sql/01_schema.sql` juga membuat `chatbot_cache` secara otomatis.
+
 ### 5. Reset + Seed seperti Laravel
 
 Kalau ingin reset database lalu migrate dan seed lagi dalam satu perintah, jalankan:
@@ -202,6 +208,7 @@ python scripts/utils/reset_db.py
 ```
 
 Script ini akan drop schema aktif, menjalankan schema + FTS, lalu seeding data dari `data/`.
+Di dalam schema bootstrap tersebut sudah termasuk `chatbot_cache`, jadi setelah reset database cache table langsung tersedia tanpa langkah tambahan.
 
 ### 6. Jalankan Server
 
@@ -312,6 +319,13 @@ User Query
 
 **Keuntungan:** Tidak butuh FAISS / ChromaDB / embedding model.  
 Semua berjalan di CPU, cocok untuk VS Code development.
+
+Catatan implementasi saat ini:
+
+- Respons statis seperti identitas, error umum, dan penolakan out-of-scope ditangani deterministik tanpa memanggil LLM.
+- Payload FastAPI yang dianggap source of truth adalah wrapper `BaseResponse` dengan isi utama di field `data`.
+- Implementasi retrieval, session management, dan cache exact-match ada di `app/services/chatbot_service.py`.
+- Mode LLM bisa diaktifkan lagi sebagai opsi saat dibutuhkan jawaban yang lebih natural untuk pertanyaan generatif, tetapi jalur deterministik tetap dipertahankan sebagai fallback utama.
 
 ---
 

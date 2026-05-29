@@ -1,406 +1,355 @@
 {
-	"info": {
-		"_postman_id": "3f4b5c6d-7e8f-9a0b-1c2d-3e4f5a6b7c8d",
-		"name": "Ciayumajakuning Smart Tourism API",
-		"description": "Koleksi API Lengkap untuk Smart Tourism Ciayumajakuning (Indramayu, Cirebon, Majalengka, Kuningan).\n\n**Prasyarat:**\n1. Atur variabel `baseUrl` (default: `http://127.0.0.1:8000/api/v1`)\n2. Login sebagai admin untuk mendapatkan `accessToken`.\n3. Masukkan `accessToken` di tab Authorization koleksi ini (Type: Bearer Token).",
-		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-	},
-	"item": [
-		{
-			"name": "Auth",
-			"item": [
-				{
-					"name": "Login Admin",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"email\": \"admin@smarttourism.id\",\n    \"password\": \"admin123\"\n}",
-							"options": {
-								"json": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/auth/login",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"auth",
-								"login"
-							]
-						}
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Wisata",
-			"item": [
-				{
-					"name": "List Wisata",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/wisata?wilayah=Indramayu&sort_by=rating&order=desc",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"wisata"
-							],
-							"query": [
-								{
-									"key": "wilayah",
-									"value": "Indramayu"
-								},
-								{
-									"key": "sort_by",
-									"value": "rating"
-								},
-								{
-									"key": "order",
-									"value": "desc"
-								}
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Detail Wisata",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/wisata/WIS-IDM-001",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"wisata",
-								"WIS-IDM-001"
-							]
-						}
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Kuliner",
-			"item": [
-				{
-					"name": "List Kuliner",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/kuliner?wilayah=Cirebon",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"kuliner"
-							],
-							"query": [
-								{
-									"key": "wilayah",
-									"value": "Cirebon"
-								}
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Detail Kuliner",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/kuliner/KUL-CRB-001",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"kuliner",
-								"KUL-CRB-001"
-							]
-						}
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Nongkrong",
-			"item": [
-				{
-					"name": "List Nongkrong",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/nongkrong?wilayah=Majalengka",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"nongkrong"
-							],
-							"query": [
-								{
-									"key": "wilayah",
-									"value": "Majalengka"
-								}
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Detail Nongkrong",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/nongkrong/NGK-MJK-001",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"nongkrong",
-								"NGK-MJK-001"
-							]
-						}
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "AI — Sentiment",
-			"item": [
-				{
-					"name": "Summary All Wilayah",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/sentiment/summary-all",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"sentiment",
-								"summary-all"
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Summary Per Wilayah",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/sentiment/summary/Indramayu?tipe_tempat=all",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"sentiment",
-								"summary",
-								"Indramayu"
-							],
-							"query": [
-								{
-									"key": "tipe_tempat",
-									"value": "all"
-								}
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Sync All (Admin)",
-					"request": {
-						"auth": {
-							"type": "bearer",
-							"bearer": [
-								{
-									"key": "token",
-									"value": "{{accessToken}}",
-									"type": "string"
-								}
-							]
-						},
-						"method": "POST",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/sentiment/sync-all",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"sentiment",
-								"sync-all"
-							]
-						}
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "AI — Chatbot RAG",
-			"item": [
-				{
-					"name": "Ask Chatbot",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"message\": \"Rekomendasi pantai bagus di Indramayu apa ya?\",\n    \"session_token\": \"\",\n    \"latitude\": -6.3265,\n    \"longitude\": 108.3203\n}",
-							"options": {
-								"json": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/chatbot/ask",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"chatbot",
-								"ask"
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Get History",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/chatbot/history/YOUR_SESSION_TOKEN",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"chatbot",
-								"history",
-								"YOUR_SESSION_TOKEN"
-							]
-						}
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "AI — Recommendation",
-			"item": [
-				{
-					"name": "Get Recommendation",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"latitude\": -6.3265,\n    \"longitude\": 108.3203,\n    \"limit\": 5\n}",
-							"options": {
-								"json": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/recommendation/",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"recommendation",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Create Planning (Itinerary)",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"wilayah\": [\"Indramayu\", \"Cirebon\"],\n    \"hari\": 3,\n    \"budget_total\": 1000000,\n    \"preferensi\": [\"Alam\", \"Kuliner\"],\n    \"judul\": \"Liburan Seru Ciayumajakuning\"\n}",
-							"options": {
-								"json": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{baseUrl}}/recommendation/planning",
-							"host": [
-								"{{baseUrl}}"
-							],
-							"path": [
-								"recommendation",
-								"planning"
-							]
-						}
-					},
-					"response": []
-				}
-			]
-		}
-	],
-	"event": [
-		{
-			"listen": "prerequest",
-			"script": {
-				"type": "text/javascript",
-				"exec": [
-					""
-				]
-			}
-		},
-		{
-			"listen": "test",
-			"script": {
-				"type": "text/javascript",
-				"exec": [
-					""
-				]
-			}
-		}
-	],
-	"variable": [
-		{
-			"key": "baseUrl",
-			"value": "http://127.0.0.1:8000/api/v1",
-			"type": "string"
-		},
-		{
-			"key": "accessToken",
-			"value": "",
-			"type": "string"
-		}
-	]
+  "info": {
+    "_postman_id": "3f4b5c6d-7e8f-9a0b-1c2d-3e4f5a6b7c8d",
+    "name": "Ciayumajakuning Smart Tourism API",
+    "description": "Koleksi API Lengkap untuk Smart Tourism Ciayumajakuning (Indramayu, Cirebon, Majalengka, Kuningan).\n\n**Prasyarat:**\n1. Atur variabel `baseUrl` (default: `http://127.0.0.1:8000/api/v1`)\n2. Login sebagai admin untuk mendapatkan `accessToken` jika ingin akses endpoint admin.\n3. Untuk chatbot, jalankan `Ask Chatbot` dulu lalu pakai `chatbotSessionToken` yang tersimpan otomatis di `Get History`.\n4. Masukkan `accessToken` di tab Authorization koleksi ini (Type: Bearer Token) hanya untuk request yang butuh auth.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login Admin",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"admin@smarttourism.id\",\n    \"password\": \"admin123\"\n}",
+              "options": {
+                "json": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Wisata",
+      "item": [
+        {
+          "name": "List Wisata",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/wisata?wilayah=Indramayu&sort_by=rating&order=desc",
+              "host": ["{{baseUrl}}"],
+              "path": ["wisata"],
+              "query": [
+                {
+                  "key": "wilayah",
+                  "value": "Indramayu"
+                },
+                {
+                  "key": "sort_by",
+                  "value": "rating"
+                },
+                {
+                  "key": "order",
+                  "value": "desc"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Detail Wisata",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/wisata/WIS-IDM-001",
+              "host": ["{{baseUrl}}"],
+              "path": ["wisata", "WIS-IDM-001"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Kuliner",
+      "item": [
+        {
+          "name": "List Kuliner",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/kuliner?wilayah=Cirebon",
+              "host": ["{{baseUrl}}"],
+              "path": ["kuliner"],
+              "query": [
+                {
+                  "key": "wilayah",
+                  "value": "Cirebon"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Detail Kuliner",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/kuliner/KUL-CRB-001",
+              "host": ["{{baseUrl}}"],
+              "path": ["kuliner", "KUL-CRB-001"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Nongkrong",
+      "item": [
+        {
+          "name": "List Nongkrong",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/nongkrong?wilayah=Majalengka",
+              "host": ["{{baseUrl}}"],
+              "path": ["nongkrong"],
+              "query": [
+                {
+                  "key": "wilayah",
+                  "value": "Majalengka"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Detail Nongkrong",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/nongkrong/NGK-MJK-001",
+              "host": ["{{baseUrl}}"],
+              "path": ["nongkrong", "NGK-MJK-001"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "AI — Sentiment",
+      "item": [
+        {
+          "name": "Summary All Wilayah",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/sentiment/summary-all",
+              "host": ["{{baseUrl}}"],
+              "path": ["sentiment", "summary-all"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Summary Per Wilayah",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/sentiment/summary/Indramayu?tipe_tempat=all",
+              "host": ["{{baseUrl}}"],
+              "path": ["sentiment", "summary", "Indramayu"],
+              "query": [
+                {
+                  "key": "tipe_tempat",
+                  "value": "all"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Sync All (Admin)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/sentiment/sync-all",
+              "host": ["{{baseUrl}}"],
+              "path": ["sentiment", "sync-all"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "AI — Chatbot RAG",
+      "item": [
+        {
+          "name": "Ask Chatbot",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"Rekomendasi pantai bagus di Indramayu apa ya?\",\n    \"session_token\": null,\n    \"latitude\": -6.3265,\n    \"longitude\": 108.3203\n}",
+              "options": {
+                "json": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/chatbot/ask",
+              "host": ["{{baseUrl}}"],
+              "path": ["chatbot", "ask"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "const token = res?.data?.session_token || res?.data?.data?.session_token;",
+                  "if (token) {",
+                  "  pm.collectionVariables.set('chatbotSessionToken', token);",
+                  "  pm.environment.set('chatbotSessionToken', token);",
+                  "  console.log('Saved chatbotSessionToken:', token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Get History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/chatbot/history/{{chatbotSessionToken}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["chatbot", "history", "{{chatbotSessionToken}}"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "AI — Recommendation",
+      "item": [
+        {
+          "name": "Get Recommendation",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"latitude\": -6.3265,\n    \"longitude\": 108.3203,\n    \"limit\": 5\n}",
+              "options": {
+                "json": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/recommendation/",
+              "host": ["{{baseUrl}}"],
+              "path": ["recommendation", ""]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Planning (Itinerary)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"wilayah\": [\"Indramayu\", \"Cirebon\"],\n    \"hari\": 3,\n    \"budget_total\": 1000000,\n    \"preferensi\": [\"Alam\", \"Kuliner\"],\n    \"judul\": \"Liburan Seru Ciayumajakuning\"\n}",
+              "options": {
+                "json": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/recommendation/planning",
+              "host": ["{{baseUrl}}"],
+              "path": ["recommendation", "planning"]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [""]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [""]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8000/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "chatbotSessionToken",
+      "value": "",
+      "type": "string"
+    }
+  ]
 }
