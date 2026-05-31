@@ -737,34 +737,42 @@ class ChatbotService:
         import hashlib
         return hashlib.sha256(normalized.encode('utf-8')).hexdigest()
 
-    async def _get_cached_answer(self, db: AsyncSession, qhash: str) -> dict | None:
+    async def _get_cached_answer(self, db: AsyncSession, session_token: str, qhash: str) -> dict | None:
         try:
-            row = await db.execute(text("SELECT id, answer, hit_count FROM chatbot_cache WHERE query_hash = :qhash"), {"qhash": qhash})
+            row = await db.execute(
+                text("SELECT id, answer, hit_count FROM chatbot_cache WHERE session_token = :token AND query_hash = :qhash"),
+                {"token": session_token, "qhash": qhash}
+            )
             res = row.fetchone()
             if not res:
                 return None
             # increment hit_count
-            await db.execute(text("UPDATE chatbot_cache SET hit_count = hit_count + 1, updated_at = now() WHERE id = :id"), {"id": str(res.id)})
+            await db.execute(
+                text("UPDATE chatbot_cache SET hit_count = hit_count + 1, updated_at = now() WHERE id = :id"),
+                {"id": str(res.id)}
+            )
             await db.commit()
             return res.answer
         except Exception as e:
-            logger.warning(f"Cache read failed (table may not exist): {e}")
+            logger.warning(f"Cache read failed: {e}")
             try:
                 await db.rollback()
             except Exception:
                 pass
             return None
 
-    async def _save_cache(self, db: AsyncSession, qhash: str, normalized: str, answer_obj: dict) -> None:
+    async def _save_cache(self, db: AsyncSession, session_token: str, qhash: str, normalized: str, answer_obj: dict) -> None:
         try:
             await db.execute(
                 text("""
-                INSERT INTO chatbot_cache (id, query_hash, query_normalized, answer, created_at, updated_at)
-                VALUES (:id, :qhash, :normalized, :answer::jsonb, now(), now())
-                ON CONFLICT (query_hash) DO UPDATE SET answer = EXCLUDED.answer, updated_at = now()
+                INSERT INTO chatbot_cache (id, session_token, query_hash, query_normalized, answer, created_at, updated_at)
+                VALUES (:id, :token, :qhash, :normalized, :answer::jsonb, now(), now())
+                ON CONFLICT (session_token, query_hash) DO UPDATE 
+                SET answer = EXCLUDED.answer, updated_at = now(), hit_count = chatbot_cache.hit_count + 1
                 """),
                 {
                     "id": str(uuid4()),
+                    "token": session_token,
                     "qhash": qhash,
                     "normalized": normalized,
                     "answer": json.dumps(answer_obj),
@@ -772,12 +780,11 @@ class ChatbotService:
             )
             await db.commit()
         except Exception as e:
-            logger.warning(f"Cache write failed (table may not exist): {e}")
+            logger.warning(f"Cache write failed: {e}")
             try:
                 await db.rollback()
             except Exception:
                 pass
-
 
     @classmethod
     def _build_grounded_answer(
@@ -857,7 +864,7 @@ class ChatbotService:
         # 1. Toleransi untuk jawaban penolakan/data kosong (tidak dianggap halusinasi)
         if any(phrase in lowered for phrase in [
             "maaf", "tidak ditemukan", "belum tersedia", "data belum ada", 
-            "coba tanyakan", "belum bisa membantu"
+            "coba tanyakan", "belum bisa ajudar"
         ]):
             return True
 
@@ -1064,7 +1071,7 @@ class ChatbotService:
             found = next((k for k in out_of_scope_keywords if k in user_part), None)
             found_text = f" tentang {found}" if found else ""
             return (
-                " **Maaf, SITA hanya bisa membantu wilayah Ciayumajakuning (Cirebon, Indramayu, Majalengka, dan Kuningan).**\n\n"
+                " **Maaf, SITA hanya bisa ajudar wilayah Ciayumajakuning (Cirebon, Indramayu, Majalengka, dan Kuningan).**\n\n"
                 f"Permintaan kamu menyebut lokasi atau topik di luar cakupan SITA{found_text}, jadi saya tidak bisa memprosesnya.\n\n"
                 "Coba tanya salah satu ini:\n"
                 "- \"Wisata alam di Kuningan\"\n"
@@ -1271,7 +1278,7 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
                     "Ada yang bisa SITA bantu?"
                 )
 
-        return None  # Aman, lanjut proses
+        return None  
 
     # ========================================================================
     # Metode Utama (Menggunakan Subtask 2 & 3)
@@ -1321,9 +1328,6 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
         """
         Method ask utama dengan arsitektur Intent-First
         """
-        # ═══════════════════════════════════════════════════════
-        # TAMBAHKAN PERBAIKAN DI SINI (Paling Atas)
-        # ═══════════════════════════════════════════════════════
         safety_rejection = self._check_content_safety(payload.message)
         if safety_rejection:
             return await self._build_and_save_response(
@@ -1403,12 +1407,22 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
         budget_min, budget_max = self.parse_budget_range_from_text(payload.message)
 
         # ═══════════════════════════════════════════════════════
-        # STEP 5: Cache check
+        # STEP 5: Cache check (SESSION-BASED)
         # ═══════════════════════════════════════════════════════
         normalized = self._normalize_query(payload.message)
         qhash = self._hash_query(normalized)
+
+        # Dapatkan session_token untuk keperluan cache
+        session_data_for_cache = await self.get_or_create_session(
+            session_token=payload.session_token, db=db,
+            latitude=payload.latitude, longitude=payload.longitude,
+            wilayah=None, user_id=user_id,
+        )
+        current_session_token = session_data_for_cache["session_token"]
+
         if settings.CACHE_ENABLED:
-            cached = await self._get_cached_answer(db, qhash)
+            # Cek cache dengan session_token
+            cached = await self._get_cached_answer(db, current_session_token, qhash)
             if cached:
                 c_answer = cached.get("answer") if isinstance(cached, dict) else cached["answer"]
                 c_wilayah = (cached.get("wilayah_terdeteksi") if isinstance(cached, dict) else None) or wilayah
@@ -1478,9 +1492,9 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
                     "link_maps": getattr(d, 'link_google_maps', None),
                 })
 
-        # Save to cache
+        # Save to cache with session_token
         try:
-            await self._save_cache(db, qhash, normalized, {
+            await self._save_cache(db, current_session_token, qhash, normalized, {
                 "answer": answer, "wilayah_terdeteksi": wilayah, "referensi": referensi,
             })
         except Exception:
