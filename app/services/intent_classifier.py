@@ -1,17 +1,8 @@
 """
-Intent Classifier untuk SITA Chatbot.
+Intent Classifier untuk SITA Chatbot - REVISED VERSION
 
 Klasifikasi intent secara deterministik (tanpa LLM) untuk routing query
 sebelum masuk ke RAG pipeline. Ini mencegah query out-of-scope masuk ke DB.
-
-Intent yang tersedia:
-- identity      : pertanyaan tentang SITA (siapa kamu, dll)
-- greeting      : sapaan (halo, hai, dll)
-- recommendation: rekomendasi wisata/kuliner/nongkrong
-- info_specific : info detail tempat tertentu
-- out_of_scope_location : lokasi di luar Ciayumajakuning
-- out_of_scope_topic    : topik non-pariwisata
-- dangerous     : konten berbahaya/ilegal
 """
 
 from __future__ import annotations
@@ -87,6 +78,7 @@ PLANNING_KEYWORDS = [
 ]
 
 # --- Info specific keywords ---
+# CATATAN REVISI: Kata "di" dihapus agar tidak bentrok dengan nama tempat/daerah (cth: "di cirebon")
 INFO_SPECIFIC_KEYWORDS = [
     "jam buka", "jam tutup", "jam operasional", "buka jam", "tutup jam",
     "harga tiket", "tiket masuk", "biaya masuk", "berapa harga",
@@ -195,7 +187,7 @@ OUT_OF_SCOPE_DESTINATIONS = {
     "tangkuban perahu", "kawah putih", "nusa penida",
     "gili trawangan", "gili meno", "gili air",
     "ubud", "kuta", "seminyak", "sanur", "tanah lot",
-    "uluwatu", "tegallalang",
+    "luwatu", "tegallalang",
 }
 
 
@@ -256,16 +248,10 @@ def _detect_out_of_scope_location(text: str) -> str | None:
 def classify_intent(message: str) -> dict:
     """
     Classify user message intent deterministik.
-
-    Returns:
-        dict dengan keys:
-        - intent: str
-        - matched_keyword: str | None
-        - has_tourism_intent: bool
-        - detected_location_issue: str | None
     """
     normalized = _normalize_text(message)
 
+    # Menggunakan fallback "out_of_scope_topic" sebagai inisialisasi default awal aman
     result = {
         "intent": "out_of_scope_topic",
         "matched_keyword": None,
@@ -333,19 +319,23 @@ def classify_intent(message: str) -> dict:
         result["matched_keyword"] = match
         return result
 
-    # === PRIORITY 9: Info specific ===
-    match = _text_contains_any(normalized, INFO_SPECIFIC_KEYWORDS)
-    if match and has_tourism:
-        result["intent"] = "info_specific"
-        result["matched_keyword"] = match
-        return result
-
-    # === PRIORITY 10: Planning ===
+    # ══════════════════════════════════════════════════════════════
+    # REVISI STRUKTUR: PLANNING DINAUKKAN KE ATAS INFO SPECIFIC
+    # ══════════════════════════════════════════════════════════════
+    
+    # === PRIORITY 9: Planning / Itinerary ===
     match = _text_contains_any(normalized, PLANNING_KEYWORDS)
     if match:
         result["intent"] = "planning"
         result["matched_keyword"] = match
         result["has_tourism_intent"] = True
+        return result
+
+    # === PRIORITY 10: Info specific ===
+    match = _text_contains_any(normalized, INFO_SPECIFIC_KEYWORDS)
+    if match and has_tourism:
+        result["intent"] = "info_specific"
+        result["matched_keyword"] = match
         return result
 
     # === FINAL GATE: wajib ada tourism signal ===
