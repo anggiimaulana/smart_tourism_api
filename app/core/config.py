@@ -23,7 +23,11 @@ class Settings(BaseSettings):
     # ── Groq ──────────────────────────────────────────────────
     # Dapatkan di: https://console.groq.com/keys
     GROQ_API_KEY: str = ""
-    GROQ_MODEL:   str = "compound-beta"
+    GROQ_MODEL:   str = "llama-3.3-70b-versatile"
+
+    # ── OpenAI ────────────────────────────────────────────────
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL:   str = "gpt-4o-mini"
 
     # ── JWT Auth ──────────────────────────────────────────────
     # Generate: python -c "import secrets; print(secrets.token_hex(32))"

@@ -60,7 +60,7 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").lower()  # "gemini" atau "gro
 
 # --- Groq Setup ---
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "compound-beta")  # atau "llama-3.3-70b-versatile"
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")  # atau "llama-3.3-70b-versatile"
 GROQ_CLIENT = None
 
 if GROQ_API_KEY:
@@ -69,6 +69,18 @@ if GROQ_API_KEY:
         GROQ_CLIENT = Groq(api_key=GROQ_API_KEY)
     except ImportError:
         print("Warning: groq package not installed. Run: pip install groq")
+
+# --- OpenAI Setup ---
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_CLIENT = None
+
+if OPENAI_API_KEY:
+    try:
+        from openai import OpenAI
+        OPENAI_CLIENT = OpenAI(api_key=OPENAI_API_KEY)
+    except ImportError:
+        print("Warning: openai package not installed. Run: pip install openai")
 
 # --- Gemini Setup ---
 import google.generativeai as genai
@@ -85,7 +97,7 @@ if GEMINI_API_KEY:
 
 # Do not raise if keys are missing — support working in degraded mode using deterministic
 # fallback that relies on DB content. Track whether any LLM provider is available.
-LLM_ENABLED = bool(GEMINI_MODEL or GROQ_CLIENT)
+LLM_ENABLED = bool(GEMINI_MODEL or GROQ_CLIENT or OPENAI_CLIENT)
 logger = logging.getLogger(__name__)
 if not LLM_ENABLED:
     logger.warning("No LLM API keys configured or providers unavailable — running in fallback-only mode.")
@@ -96,6 +108,7 @@ def get_llm_runtime_status() -> dict:
         "llm_enabled": LLM_ENABLED,
         "gemini_enabled": bool(GEMINI_MODEL),
         "groq_enabled": bool(GROQ_CLIENT),
+        "openai_enabled": bool(OPENAI_CLIENT),
         "provider": LLM_PROVIDER,
     }
 
@@ -766,7 +779,7 @@ class ChatbotService:
             await db.execute(
                 text("""
                 INSERT INTO chatbot_cache (id, session_token, query_hash, query_normalized, answer, created_at, updated_at)
-                VALUES (:id, :token, :qhash, :normalized, :answer::jsonb, now(), now())
+                VALUES (:id, :token, :qhash, :normalized, CAST(:answer AS JSONB), now(), now())
                 ON CONFLICT (session_token, query_hash) DO UPDATE 
                 SET answer = EXCLUDED.answer, updated_at = now(), hit_count = chatbot_cache.hit_count + 1
                 """),
@@ -810,8 +823,14 @@ class ChatbotService:
         
         tipe_label = {"wisata": "wisata", "kuliner": "kuliner", "nongkrong": "tempat nongkrong"}
         tipe_emoji = {"wisata": "🏖️", "kuliner": "🍜", "nongkrong": "☕"}
-        label = tipe_label.get(dominant_tipe, "wisata")
-        emoji = tipe_emoji.get(dominant_tipe, "🏖️")
+        
+        # If there are multiple types, use a generic label
+        if len(tipe_counts) > 1:
+            label = "tempat menarik"
+            emoji = "✨"
+        else:
+            label = tipe_label.get(dominant_tipe, "wisata")
+            emoji = tipe_emoji.get(dominant_tipe, "🏖️")
 
         lines = [f"{emoji} Berikut rekomendasi **{label}** di **{scope}** dari data yang tersedia:"]
 
@@ -838,11 +857,11 @@ class ChatbotService:
             deskripsi_text = f" - {deskripsi[:140]}" if deskripsi else ""
             lines.append(
                 f"{i}. **{nama}** ({area})\n"
-                f"   - Lokasi: {alamat}\n"
-                f"   - Jam buka: {jam_buka} - {jam_tutup}\n"
-                f"   - Estimasi biaya: {harga_text}\n"
-                f"   - Maps: {maps}"
-                f"{deskripsi_text}"
+                f"   - **Lokasi:** {alamat}\n"
+                f"   - **Jam buka:** {jam_buka} - {jam_tutup}\n"
+                f"   - **Estimasi biaya:** {harga_text}\n"
+                f"   - **Maps:** {maps}"
+                f"{deskripsi_text}\n"
             )
 
         lines.append("\nSemua rekomendasi di atas diambil dari data database Smart Tourism.")
@@ -864,7 +883,9 @@ class ChatbotService:
         # 1. Toleransi untuk jawaban penolakan/data kosong (tidak dianggap halusinasi)
         if any(phrase in lowered for phrase in [
             "maaf", "tidak ditemukan", "belum tersedia", "data belum ada", 
-            "coba tanyakan", "belum bisa ajudar"
+            "coba tanyakan", "belum bisa", "butuh bantuan", "lokasi", "posisi",
+            "di luar wilayah", "di luar jangkauan", "tidak melayani", "hanya melayani",
+            "tidak memiliki informasi", "tidak ada informasi", "tidak tahu", "tidak dapat"
         ]):
             return True
 
@@ -911,10 +932,12 @@ class ChatbotService:
             return ChatbotService._get_mock_fallback(prompt, docs)
 
         # Tentukan urutan provider berdasarkan konfigurasi
-        if LLM_PROVIDER == "groq" and GROQ_CLIENT:
-            providers = [("groq", self._call_groq), ("gemini", self._call_gemini)]
+        if LLM_PROVIDER == "openai" and OPENAI_CLIENT:
+            providers = [("openai", self._call_openai), ("groq", self._call_groq), ("gemini", self._call_gemini)]
+        elif LLM_PROVIDER == "groq" and GROQ_CLIENT:
+            providers = [("groq", self._call_groq), ("openai", self._call_openai), ("gemini", self._call_gemini)]
         else:
-            providers = [("gemini", self._call_gemini), ("groq", self._call_groq)]
+            providers = [("gemini", self._call_gemini), ("openai", self._call_openai), ("groq", self._call_groq)]
 
         for provider_name, call_fn in providers:
             logger.info(f"Attempting LLM provider: {provider_name}")
@@ -931,7 +954,7 @@ class ChatbotService:
 
         # Semua provider gagal -> fallback
         logger.warning("All LLM providers failed. Using mock deterministic fallback.")
-        return ChatbotService._get_mock_fallback(prompt, docs)
+        return None
 
     @staticmethod
     def _call_gemini(prompt: str) -> str | None:
@@ -976,7 +999,7 @@ class ChatbotService:
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.7,
-                max_tokens=2048,
+                max_tokens=1024,
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -984,7 +1007,28 @@ class ChatbotService:
             return None
 
     @staticmethod
-    def _get_mock_fallback(prompt: str, docs: list = None) -> str:
+    def _call_openai(prompt: str) -> str | None:
+        """Call OpenAI API."""
+        if not OPENAI_CLIENT:
+            return None
+        
+        try:
+            response = OPENAI_CLIENT.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=[
+                    {"role": "system", "content": "Kamu adalah SITA, asisten pariwisata Ciayumajakuning. Jawab dalam Bahasa Indonesia dengan ramah dan informatif. Hanya jawab pertanyaan seputar wisata, kuliner, dan tempat nongkrong di wilayah Cirebon, Indramayu, Majalengka, dan Kuningan."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.7,
+                max_tokens=1024,
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"Error: OpenAI error: {e}")
+            return None
+
+    @staticmethod
+    def _get_mock_fallback(prompt: str, docs: list = None, intent: str = "conversational") -> str:
         """Logic mock yang cerdas, aman, dan informatif (Fallback RAG)."""
         import re
         import html
@@ -997,7 +1041,7 @@ class ChatbotService:
             return text.lower().strip()[:500]
 
         # Ambil bagian PERTANYAAN USER saja dari prompt agar tidak rancu dengan SYSTEM_PROMPT
-        user_part_raw = prompt.split("PERTANYAAN USER:")[-1].split("JAWABAN SITA:")[0] if "PERTANYAAN USER:" in prompt else prompt
+        user_part_raw = prompt.split("PERTANYAAN USER:")[-1].split("INSTRUKSI TAMBAHAN:")[0].split("JAWABAN SITA:")[0] if "PERTANYAAN USER:" in prompt else prompt
         user_part = sanitize(user_part_raw)
 
         tourism_keywords = [
@@ -1079,8 +1123,8 @@ class ChatbotService:
         is_asking_nearby = "terdekat" in user_part
         is_asking_price = any(k in user_part for k in ["harga", "biaya", "tiket", "bayar"])
 
-        if any(k in user_part for k in ["halo", "hai", "pagi", "siang", "sore", "malam"]) and not has_tourism_intent and not docs:
-            return f"Halo! Ada yang bisa SITA bantu di {wilayah}? Saya punya banyak info tempat wisata, kuliner, dan cafe lokal lho."
+        if intent == "conversational" or (any(k in user_part for k in ["halo", "hai", "pagi", "siang", "sore", "malam"]) and not has_tourism_intent):
+            return f"Halo! Ada yang bisa SITA bantu di Ciayumajakuning? Saya punya banyak info tempat wisata, kuliner, dan cafe lokal lho."
 
         elif docs:
             # Ambil data utama
@@ -1211,21 +1255,6 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
             "deepfake", "pornografi", "porno", "judi online", "slot online",
         ]
 
-        # Topik di luar konteks pariwisata  tolak dengan halus
-        irrelevant_topics = [
-            "politik", "presiden", "pemilu", "partai", "pilkada",
-            "agama", "aliran sesat", "kafir", "halal haram",
-            "tugas sekolah", "tugas kuliah", "kerjakan pr", "jawab soal",
-            "matematika", "fisika", "kimia", "biologi", "rumus",
-            "coding", "programming", "python", "javascript", "java", "kode program",
-            "pinjol", "pinjaman online", "investasi bodong",
-            "jodoh", "pacar", "mantan", "selingkuh",
-            "berita terkini", "gosip artis", "selebriti",
-            "resep masak",  # bukan rekomendasi tempat makan
-            "cara menulis", "cara membuat essay", "cara presentasi",
-            "translate", "terjemahkan",
-        ]
-
         # Check dangerous content
         for keyword in dangerous_keywords:
             if keyword in msg_lower:
@@ -1241,20 +1270,7 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
                     "Ada yang bisa SITA bantu seputar Ciayumajakuning?"
                 )
 
-        # Check irrelevant topics
-        for keyword in irrelevant_topics:
-            if keyword in msg_lower:
-                return (
-                    " **Maaf ya, SITA hanya bisa menjawab pertanyaan seputar pariwisata, "
-                    "kuliner, dan tempat nongkrong di Ciayumajakuning.**\n\n"
-                    "Pertanyaan di luar topik tersebut belum bisa SITA jawab. "
-                    "Tapi kalau kamu butuh rekomendasi liburan, SITA siap bantu!\n\n"
-                    " Coba tanya:\n"
-                    "- \"Tempat nongkrong kekinian di Majalengka\"\n"
-                    "- \"Kuliner khas Indramayu yang wajib dicoba\"\n"
-                    "- \"Wisata keluarga di Kuningan\"\n\n"
-                    "Ada yang bisa SITA bantu?"
-                )
+        return None
 
         return None  
 
@@ -1324,13 +1340,18 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
         # STEP 2: Route static intents (NO DB access)
         # ═══════════════════════════════════════════════════════
         STATIC_INTENT_MAP = {
-            "identity": get_identity_response,
-            "greeting": get_greeting_response,
-            "thanks": get_thanks_response,
-            "farewell": get_farewell_response,
             "dangerous": get_dangerous_content_response,
             "unknown": get_unknown_intent_response,
         }
+
+        # Jika LLM mati, gunakan static response untuk semuanya
+        if not LLM_ENABLED:
+            STATIC_INTENT_MAP.update({
+                "identity": get_identity_response,
+                "greeting": get_greeting_response,
+                "thanks": get_thanks_response,
+                "farewell": get_farewell_response,
+            })
 
         if intent in STATIC_INTENT_MAP:
             answer = STATIC_INTENT_MAP[intent]()
@@ -1414,8 +1435,19 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
         # ═══════════════════════════════════════════════════════
         is_planning = (intent == "planning")
         top_k_val = 15 if is_planning else 5
+
+        # Contextualize query for RAG retrieval to avoid amnesia
+        search_query = payload.message
+        history_msgs = session_data_for_cache.get("messages", [])
+        if len(history_msgs) >= 2:
+            followup_keywords = ["kesana", "ke sana", "disana", "di sana", "tempat itu", "tempat tadi", "tiket", "jam", "buka", "tutup", "lokasi", "harga", "dimana"]
+            if any(kw in payload.message.lower() for kw in followup_keywords) or len(payload.message.split()) <= 3:
+                last_user_msg = next((m["content"] for m in reversed(history_msgs) if m["role"] == "user"), "")
+                if last_user_msg:
+                    search_query = f"{last_user_msg} {payload.message}"
+
         docs = await self.retrieve_from_db(
-            db=db, user_message=payload.message,
+            db=db, user_message=search_query,
             wilayah_filter=wilayah_filter, top_k=top_k_val,
             lat=payload.latitude, lng=payload.longitude,
             budget_min=budget_min, budget_max=budget_max,
@@ -1439,17 +1471,32 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
         answer = await self._generate_gemini_response(prompt, docs)
         
         # Fallback jika LLM gagal total
+        is_llm_failed = False
         if answer:
-            # Cek apakah jawaban LLM sesuai konteks DB & wilayah
-            if docs and not self._is_answer_grounded(answer, docs, wilayah_filter):
+            # Cek apakah jawaban LLM sesuai konteks DB & wilayah (SKIP untuk percakapan biasa)
+            if intent != "conversational" and docs and not self._is_answer_grounded(answer, docs, wilayah_filter):
                 logger.warning("⚠️ LLM answer failed grounding check. Switching to deterministic fallback.")
                 answer = self._build_grounded_answer(docs, wilayah, budget_min, budget_max)
         else:
-        # LLM benar-benar gagal/kosong
-            if docs:
-                answer = self._build_grounded_answer(docs, wilayah, budget_min, budget_max)
+            # LLM benar-benar gagal/kosong (Rate Limit / Timeout)
+            is_llm_failed = True
+            
+            # Smart Fallback
+            if intent in ["greeting", "identity", "thanks", "farewell"]:
+                static_map = {
+                    "identity": get_identity_response,
+                    "greeting": get_greeting_response,
+                    "thanks": get_thanks_response,
+                    "farewell": get_farewell_response,
+                }
+                answer = static_map[intent]()
+                docs = []
+            elif docs: # Intent terkait pariwisata yang butuh data
+                logger.warning("LLM failed. Using deterministic fallback from DB.")
+                answer = "*(Sistem sedang sibuk, SITA beralih ke Mode Cepat)*\n\n" + self._build_grounded_answer(docs, wilayah, budget_min, budget_max)
             else:
-                answer = get_no_data_response(wilayah)
+                answer = "Waduh, maaf banget ya 🙏 Saat ini SITA sedang sibuk melayani Sobat Jalan lainnya (LLM Limit). Coba sapa SITA lagi beberapa saat ya! ✨"
+                docs = []
 
         # Siapkan referensi yang benar-benar disebutkan oleh LLM
         referensi = []

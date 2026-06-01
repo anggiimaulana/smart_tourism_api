@@ -27,7 +27,9 @@ IDENTITY_KEYWORDS = [
     "apa fungsimu", "apa tujuanmu", "kamu bisa apa", "bisa apa kamu",
     "apa yang bisa kamu lakukan", "kemampuan kamu", "fitur kamu",
     "siapa yang membuat kamu", "siapa pembuat kamu", "dibuat oleh siapa",
-    "developer kamu siapa", "siapa yang buat kamu",
+    "developer kamu siapa", "siapa yang buat kamu", "siapa pencipta kamu",
+    "km itu siapa", "kamu sapa", "km sapa", "kamu penciptanya siapa",
+    "lu siapa", "elu siapa", "lu sapa",
 ]
 
 # --- Help / How-to-use keywords ---
@@ -68,6 +70,8 @@ TOURISM_KEYWORDS = [
     "liburan", "jalan-jalan", "piknik", "vacation", "holiday",
     "destinasi", "tempat hits",
     "tempat kekinian", "tempat instagramable", "spot foto",
+    "healing", "staycation", "chill", "refreshing", "cuci mata", "nyantai", "refresh",
+    "merekomendasikan", "rekomenin", "rekomendasiin", "nyari", "cari", "mau ke", "pergi ke",
 ]
 
 # --- Planning / Itinerary keywords ---
@@ -101,9 +105,11 @@ DANGEROUS_KEYWORDS = [
 # --- Irrelevant topics ---
 IRRELEVANT_TOPICS = [
     "politik", "presiden", "pemilu", "partai", "pilkada", "gubernur",
+    "mentri", "menteri", "pemerintah",
     "agama", "aliran sesat", "kafir", "halal haram",
     "tugas sekolah", "tugas kuliah", "kerjakan pr", "jawab soal",
     "coding", "programming", "python", "javascript", "html", "php",
+    "flutter", "dart", "react", "laravel", "mysql", "postgresql", "nodejs", "css", "kode program",
     "matematika", "fisika", "kimia", "sejarah umum", "biologi",
     "harga hp", "handphone", "laptop", "elektronik", "rekomendasi hp",
     "baju", "sepatu", "buku", "obat", "sakit", "rumah sakit",
@@ -168,7 +174,7 @@ INTERNATIONAL_LOCATIONS = {
     "turki", "turkey", "istanbul",
     "arab saudi", "saudi arabia", "dubai", "abu dhabi",
     "eropa", "europe", "asia tenggara", "afrika", "africa",
-    "amerika selatan", "south america", "brazil", "brasil",
+    "amerika selatan", "south america", "brazil", "brasil", "argentina", "chile", "peru",
     "kanada", "canada", "meksiko", "mexico",
     "new york", "los angeles", "london", "hawaii",
     "maldives", "maladewa", "swiss", "switzerland",
