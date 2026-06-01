@@ -36,7 +36,9 @@ IDENTITY_KEYWORDS = [
     "apa fungsimu", "apa tujuanmu", "kamu bisa apa", "bisa apa kamu",
     "apa yang bisa kamu lakukan", "kemampuan kamu", "fitur kamu",
     "siapa yang membuat kamu", "siapa pembuat kamu", "dibuat oleh siapa",
-    "developer kamu siapa", "siapa yang buat kamu",
+    "developer kamu siapa", "siapa yang buat kamu", "siapa pencipta kamu",
+    "km itu siapa", "kamu sapa", "km sapa", "kamu penciptanya siapa",
+    "lu siapa", "elu siapa", "lu sapa",
 ]
 
 # --- Help / How-to-use keywords ---
@@ -77,6 +79,8 @@ TOURISM_KEYWORDS = [
     "liburan", "jalan-jalan", "piknik", "vacation", "holiday",
     "destinasi", "tempat hits",
     "tempat kekinian", "tempat instagramable", "spot foto",
+    "healing", "staycation", "chill", "refreshing", "cuci mata", "nyantai", "refresh",
+    "merekomendasikan", "rekomenin", "rekomendasiin", "nyari", "cari", "mau ke", "pergi ke",
 ]
 
 # --- Planning / Itinerary keywords ---
@@ -109,9 +113,11 @@ DANGEROUS_KEYWORDS = [
 # --- Irrelevant topics ---
 IRRELEVANT_TOPICS = [
     "politik", "presiden", "pemilu", "partai", "pilkada", "gubernur",
+    "mentri", "menteri", "pemerintah",
     "agama", "aliran sesat", "kafir", "halal haram",
     "tugas sekolah", "tugas kuliah", "kerjakan pr", "jawab soal",
     "coding", "programming", "python", "javascript", "html", "php",
+    "flutter", "dart", "react", "laravel", "mysql", "postgresql", "nodejs", "css", "kode program",
     "matematika", "fisika", "kimia", "sejarah umum", "biologi",
     "harga hp", "handphone", "laptop", "elektronik", "rekomendasi hp",
     "baju", "sepatu", "buku", "obat", "sakit", "rumah sakit",
@@ -179,10 +185,11 @@ INTERNATIONAL_LOCATIONS = {
     "turki", "turkey", "istanbul",
     "arab saudi", "saudi arabia", "dubai", "abu dhabi",
     "eropa", "europe", "asia tenggara", "afrika", "africa",
-    "amerika selatan", "south america", "brazil", "brasil",
+    "amerika selatan", "south america", "brazil", "brasil", "argentina", "chile", "peru",
     "kanada", "canada", "meksiko", "mexico",
     "new york", "los angeles", "london", "hawaii",
     "maldives", "maladewa", "swiss", "switzerland",
+    "kutub utara", "kutub selatan", "antartika", "antarctica",
     # Famous international destinations
     "eiffel", "colosseum", "taj mahal", "great wall",
     "niagara", "grand canyon", "santorini", "mykonos",
@@ -385,8 +392,8 @@ def classify_intent(message: str) -> dict:
     # === PRIORITY 4: Out-of-scope TOPIC ===
     match = _text_contains_any(normalized, IRRELEVANT_TOPICS)
     if match:
-        if has_tourism and has_supported:
-            pass  # Allow — tourism intent in supported region takes priority
+        if has_tourism:
+            pass  # Allow — tourism intent takes priority (it will default to Ciayumajakuning later)
         else:
             result["intent"] = "out_of_scope_topic"
             result["matched_keyword"] = match
@@ -396,6 +403,13 @@ def classify_intent(message: str) -> dict:
     match = _text_contains_any(normalized, GREETING_KEYWORDS)
     if match and not has_tourism:
         result["intent"] = "greeting"
+        result["matched_keyword"] = match
+        return result
+        
+    # === PRIORITY 5.3: Identity (no tourism intent) ===
+    match = _text_contains_any(normalized, IDENTITY_KEYWORDS)
+    if match and not has_tourism:
+        result["intent"] = "identity"
         result["matched_keyword"] = match
         return result
         
@@ -440,13 +454,13 @@ def classify_intent(message: str) -> dict:
     
     # === PRIORITY 10: Valid recommendation ===
     if has_tourism:
-        result["intent"] = "unknown"
+        result["intent"] = "recommendation"
         result["matched_keyword"] = _text_contains_any(normalized, TOURISM_KEYWORDS)
         return result
     
     # === DEFAULT: fallback to conversational RAG ===
     # Instead of blocking unknown inputs, we route them to the RAG LLM
     # so the bot can maintain natural conversational flow (e.g. answering "di jatibarang" to a follow-up question)
-    result["intent"] = "recommendation"
-    result["has_tourism_intent"] = True
+    result["intent"] = "conversational"
+    result["has_tourism_intent"] = False
     return result
