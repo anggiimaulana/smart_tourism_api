@@ -23,5 +23,11 @@ class ChatbotCache(Base):
         UniqueConstraint('session_token', 'query_hash', name='uq_session_query_hash'),
     )
 
+    # Tambahkan composite unique constraint (session_token, query_hash)
+    from sqlalchemy import UniqueConstraint
+    __table_args__ = (
+        UniqueConstraint('session_token', 'query_hash', name='uq_session_query_hash'),
+    )
+
     def __repr__(self) -> str:  # pragma: no cover - trivial
         return f"<ChatbotCache {self.query_hash[:12]}... hits={self.hit_count}>"

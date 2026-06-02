@@ -75,7 +75,7 @@ if GROQ_API_KEY:
 
 # --- OpenAI Setup ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "meta-llama/llama-3.3-70b-instruct")
 OPENAI_CLIENT = None
 
 if OPENAI_API_KEY:
