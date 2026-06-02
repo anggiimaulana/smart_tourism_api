@@ -75,7 +75,7 @@ if GROQ_API_KEY:
 
 # --- OpenAI Setup ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "meta-llama/llama-3.3-70b-instruct")
 OPENAI_CLIENT = None
 
 if OPENAI_API_KEY:
@@ -1555,8 +1555,8 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
         if answer:
             # Cek apakah jawaban LLM sesuai konteks DB & wilayah (SKIP untuk percakapan biasa)
             # if intent != "conversational" and docs and not self._is_answer_grounded(answer, docs, wilayah_filter):
-               # logger.warning("⚠️ LLM answer failed grounding check. Switching to deterministic fallback.")
-               # answer = self._build_grounded_answer(docs, wilayah, budget_min, budget_max)
+            # logger.warning("⚠️ LLM answer failed grounding check. Switching to deterministic fallback.")
+            # answer = self._build_grounded_answer(docs, wilayah, budget_min, budget_max)
             pass
         else:
             # LLM benar-benar gagal/kosong (Rate Limit / Timeout)
