@@ -16,11 +16,13 @@ from app.models.user import User
 from app.models.user_history import UserHistory
 from app.models.user_preference import UserPreference
 from app.models.wisata import Wisata
+from app.models.llm_config import LlmConfig
  
 __all__ = [
     "ChatbotSession",
     "ChatbotCache",
     "Kuliner",
+    "LlmConfig",
     "Nongkrong",
     "PlanningWisata",
     "SentimentResult",

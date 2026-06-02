@@ -37,6 +37,9 @@ from prompts.chatbot_prompts import (
     format_lokasi,
 )
 
+# Dynamic LLM config from shared DB (Laravel Filament)
+from app.services.llm_config_service import get_active_llm_config
+
 # Intent classification & static responses
 from app.services.intent_classifier import classify_intent
 from app.services.static_responses import (
@@ -78,7 +81,10 @@ OPENAI_CLIENT = None
 if OPENAI_API_KEY:
     try:
         from openai import OpenAI
-        OPENAI_CLIENT = OpenAI(api_key=OPENAI_API_KEY)
+        OPENAI_CLIENT = OpenAI(
+            api_key=OPENAI_API_KEY,
+            base_url="https://openrouter.ai/api/v1"
+        )
     except ImportError:
         print("Warning: openai package not installed. Run: pip install openai")
 
@@ -920,22 +926,41 @@ class ChatbotService:
 
         return True
 
-    # --- Helper: Async wrapper untuk LLM API (Gemini / Groq) ---
-    async def _generate_gemini_response(self, prompt: str, docs: list = None) -> str:
-        """Wrapper async untuk memanggil LLM API (Gemini atau Groq) dengan fallback."""
-        
+    # --- Helper: Async wrapper untuk LLM API (Gemini / Groq / OpenAI) ---
+    async def _generate_gemini_response(self, prompt: str, docs: list = None, db: AsyncSession = None) -> str:
+        """Wrapper async untuk memanggil LLM API dengan dynamic config dari DB (Filament) atau fallback .env."""
+
         import time
 
         # If LLM is not enabled, skip attempts and return mock fallback
         if not LLM_ENABLED:
+            logger.info("LLM disabled — trying dynamic config from DB...")
+
+        # 1) Coba dynamic config dari database (diatur via Laravel Filament)
+        db_config = None
+        if db is not None:
+            try:
+                db_config = await get_active_llm_config(db)
+            except Exception as e:
+                logger.warning("Failed to fetch LLM config from DB: %s", e)
+
+        if db_config:
+            logger.info("Using dynamic LLM config from DB: provider=%s model=%s", db_config["provider"], db_config["model"])
+            result = await asyncio.to_thread(self._call_dynamic_provider, prompt, db_config)
+            if result:
+                return result
+            logger.warning("Dynamic LLM config failed, falling back to env-based providers.")
+
+        # If LLM is disabled (no env keys) AND no DB config, return mock
+        if not LLM_ENABLED:
             logger.info("LLM disabled — using deterministic fallback for response.")
             return ChatbotService._get_mock_fallback(prompt, docs)
 
-        # Tentukan urutan provider berdasarkan konfigurasi
+        # 2) Fallback ke module-level providers (dari .env)
         if LLM_PROVIDER == "openai" and OPENAI_CLIENT:
             providers = [("openai", self._call_openai), ("groq", self._call_groq), ("gemini", self._call_gemini)]
         elif LLM_PROVIDER == "groq" and GROQ_CLIENT:
-            providers = [("groq", self._call_groq), ("openai", self._call_openai), ("gemini", self._call_gemini)]
+            providers = [("groq", self._call_groq), ("gemini", self._call_gemini), ("openai", self._call_openai)]
         else:
             providers = [("gemini", self._call_gemini), ("openai", self._call_openai), ("groq", self._call_groq)]
 
@@ -955,6 +980,61 @@ class ChatbotService:
         # Semua provider gagal -> fallback
         logger.warning("All LLM providers failed. Using mock deterministic fallback.")
         return None
+
+    @staticmethod
+    def _call_dynamic_provider(prompt: str, config: dict) -> str | None:
+        """Call LLM menggunakan konfigurasi dari database (Filament).
+        
+        config keys: provider, base_url, api_key, model
+        """
+        provider = config.get("provider", "").lower()
+        api_key = config.get("api_key")
+        model = config.get("model")
+        base_url = config.get("base_url")
+
+        if not api_key:
+            logger.warning("Dynamic config has no API key for provider: %s", provider)
+            return None
+
+        system_msg = "Kamu adalah SITA, asisten pariwisata Ciayumajakuning. Jawab dalam Bahasa Indonesia dengan ramah dan informatif. Hanya jawab pertanyaan seputar wisata, kuliner, dan tempat nongkrong di wilayah Cirebon, Indramayu, Majalengka, dan Kuningan."
+
+        try:
+            if provider == "openai":
+                from openai import OpenAI
+                client = OpenAI(api_key=api_key, base_url=base_url or "https://openrouter.ai/api/v1")
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": prompt}],
+                    temperature=0.7,
+                    max_tokens=1024,
+                )
+                return response.choices[0].message.content
+
+            elif provider == "groq":
+                from groq import Groq
+                client = Groq(api_key=api_key)
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": prompt}],
+                    temperature=0.7,
+                    max_tokens=1024,
+                )
+                return response.choices[0].message.content
+
+            elif provider == "gemini":
+                import google.generativeai as genai
+                genai.configure(api_key=api_key)
+                gen_model = genai.GenerativeModel(model)
+                response = gen_model.generate_content(prompt, generation_config={"max_output_tokens": 2048})
+                return response.text
+
+            else:
+                logger.warning("Unknown provider in dynamic config: %s", provider)
+                return None
+
+        except Exception as e:
+            logger.warning("Dynamic LLM call failed (%s): %s", provider, e)
+            return None
 
     @staticmethod
     def _call_gemini(prompt: str) -> str | None:
@@ -1468,15 +1548,16 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
             latitude=payload.latitude,
             longitude=payload.longitude
         )
-        answer = await self._generate_gemini_response(prompt, docs)
+        answer = await self._generate_gemini_response(prompt, docs, db=db)
         
         # Fallback jika LLM gagal total
         is_llm_failed = False
         if answer:
             # Cek apakah jawaban LLM sesuai konteks DB & wilayah (SKIP untuk percakapan biasa)
-            if intent != "conversational" and docs and not self._is_answer_grounded(answer, docs, wilayah_filter):
-                logger.warning("⚠️ LLM answer failed grounding check. Switching to deterministic fallback.")
-                answer = self._build_grounded_answer(docs, wilayah, budget_min, budget_max)
+            # if intent != "conversational" and docs and not self._is_answer_grounded(answer, docs, wilayah_filter):
+               # logger.warning("⚠️ LLM answer failed grounding check. Switching to deterministic fallback.")
+               # answer = self._build_grounded_answer(docs, wilayah, budget_min, budget_max)
+            pass
         else:
             # LLM benar-benar gagal/kosong (Rate Limit / Timeout)
             is_llm_failed = True
