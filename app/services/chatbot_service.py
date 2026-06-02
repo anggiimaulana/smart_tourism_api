@@ -72,13 +72,16 @@ if GROQ_API_KEY:
 
 # --- OpenAI Setup ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "meta-llama/llama-3.3-70b-instruct")
 OPENAI_CLIENT = None
 
 if OPENAI_API_KEY:
     try:
         from openai import OpenAI
-        OPENAI_CLIENT = OpenAI(api_key=OPENAI_API_KEY)
+        OPENAI_CLIENT = OpenAI(
+            api_key=OPENAI_API_KEY,
+            base_url="https://openrouter.ai/api/v1"
+        )
     except ImportError:
         print("Warning: openai package not installed. Run: pip install openai")
 
@@ -935,7 +938,7 @@ class ChatbotService:
         if LLM_PROVIDER == "openai" and OPENAI_CLIENT:
             providers = [("openai", self._call_openai), ("groq", self._call_groq), ("gemini", self._call_gemini)]
         elif LLM_PROVIDER == "groq" and GROQ_CLIENT:
-            providers = [("groq", self._call_groq), ("openai", self._call_openai), ("gemini", self._call_gemini)]
+            providers = [("groq", self._call_groq), ("gemini", self._call_gemini), ("openai", self._call_openai)]
         else:
             providers = [("gemini", self._call_gemini), ("openai", self._call_openai), ("groq", self._call_groq)]
 
@@ -1474,9 +1477,10 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
         is_llm_failed = False
         if answer:
             # Cek apakah jawaban LLM sesuai konteks DB & wilayah (SKIP untuk percakapan biasa)
-            if intent != "conversational" and docs and not self._is_answer_grounded(answer, docs, wilayah_filter):
-                logger.warning("⚠️ LLM answer failed grounding check. Switching to deterministic fallback.")
-                answer = self._build_grounded_answer(docs, wilayah, budget_min, budget_max)
+            # if intent != "conversational" and docs and not self._is_answer_grounded(answer, docs, wilayah_filter):
+            #     logger.warning("⚠️ LLM answer failed grounding check. Switching to deterministic fallback.")
+            #     answer = self._build_grounded_answer(docs, wilayah, budget_min, budget_max)
+            pass
         else:
             # LLM benar-benar gagal/kosong (Rate Limit / Timeout)
             is_llm_failed = True
