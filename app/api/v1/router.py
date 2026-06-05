@@ -9,6 +9,7 @@ from app.api.v1.endpoints import (
     sentiment,
     chatbot,
     recommendation,
+    reviews,
 )
 
 router = APIRouter()
@@ -35,6 +36,11 @@ router.include_router(
     nongkrong.router,
     prefix="/nongkrong",
     tags=["Nongkrong"],
+)
+router.include_router(
+    reviews.router,
+    prefix="/reviews",
+    tags=["Reviews"],
 )
 
 # ── AI Systems ────────────────────────────────────────────────
