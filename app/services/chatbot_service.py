@@ -120,9 +120,7 @@ def get_llm_runtime_status() -> dict:
 
 
 # Daftar Provinsi Indonesia (untuk deteksi lokasi out-of-scope)
-SUPPORTED_REGIONS = {
-    "cirebon", "indramayu", "majalengka", "kuningan", "ciayumajakuning", "jawa barat"
-}
+# SUPPORTED_REGIONS akan diambil dinamis dari database
 
 INDONESIAN_PROVINCES = {
     "aceh", "sumatera utara", "sumatera barat", "riau", "jambi", "sumatera selatan",
@@ -156,12 +154,12 @@ def _extract_locations_from_text(text: str) -> set:
     return locations
 
 
-def _is_location_in_supported_region(location: str) -> bool:
-    """Check apakah lokasi dalam wilayah Ciayumajakuning."""
+def _is_location_in_supported_region(location: str, supported_regions: set) -> bool:
+    """Check apakah lokasi dalam wilayah yang di-support database."""
     loc_lower = location.lower().strip()
-    if loc_lower in SUPPORTED_REGIONS:
+    if loc_lower in supported_regions:
         return True
-    for supported in SUPPORTED_REGIONS:
+    for supported in supported_regions:
         if supported in loc_lower:
             return True
     return False
@@ -170,7 +168,24 @@ def _is_location_in_supported_region(location: str) -> bool:
 class ChatbotService:
     """Async service for chatbot workflows using RAG Pipeline."""
 
-    WILAYAH_LIST = ("Indramayu", "Cirebon", "Majalengka", "Kuningan")
+    def __init__(self):
+        self._wilayah_list = []
+        self._supported_regions = set()
+        
+    async def _load_regions(self, db: AsyncSession):
+        """Memuat data wilayah dari tabel regions agar tidak hardcoded."""
+        if self._wilayah_list:
+            return
+            
+        rows = await db.execute(text("SELECT name FROM regions WHERE is_active = true"))
+        regions = [row[0] for row in rows]
+        if not regions:
+            # Fallback jika tabel regions kosong
+            regions = ["Indramayu", "Cirebon", "Majalengka", "Kuningan"]
+            
+        self._wilayah_list = tuple(regions)
+        self._supported_regions = {r.lower() for r in regions}
+        self._supported_regions.update(["ciayumajakuning", "jawa barat"]) # global scope aliases
 
     @staticmethod
     def _timestamp() -> str:
@@ -699,9 +714,10 @@ class ChatbotService:
         
         riwayat_text = "-"
         if history:
-            recent = history[-2:]  #  Optimasi: dikurangi dari 3 ke 2
+            # Mengirimkan 5 pesan terbaru sesuai dengan saran pengembangan
+            recent = history[-10:]  # 10 pesan = 5 user + 5 assistant
             riwayat_text = "\n".join([
-                f"User: {h['content']}\nSITA: {h.get('content', '')}" 
+                f"{h['role'].capitalize()}: {h['content']}" 
                 for h in recent
             ])
         
@@ -719,11 +735,10 @@ class ChatbotService:
                 pertanyaan=user_message
             )
 
-    @classmethod
-    def _build_relevant_followup_suggestions(cls, wilayah: str | None) -> str:
+    def _build_relevant_followup_suggestions(self, wilayah: str | None) -> str:
         """Buat contoh pertanyaan lanjutan yang relevan dengan wilayah aktif."""
-        target = wilayah if wilayah in cls.WILAYAH_LIST else "Ciayumajakuning"
-        if target in cls.WILAYAH_LIST:
+        target = wilayah if wilayah in self._wilayah_list else "Ciayumajakuning"
+        if target in self._wilayah_list:
             return (
                 "\n\n**Coba tanya SITA hal lain seperti:**\n"
                 f"- \"Rekomendasi wisata alam di {target}\"\n"
@@ -805,9 +820,8 @@ class ChatbotService:
             except Exception:
                 pass
 
-    @classmethod
     def _build_grounded_answer(
-        cls,
+        self,
         docs: list,
         wilayah: str | None,
         budget_min: int | None = None,
@@ -817,12 +831,12 @@ class ChatbotService:
         if not docs:
             return get_no_data_response(wilayah)
 
-        scope = wilayah if wilayah in cls.WILAYAH_LIST else "Ciayumajakuning"
+        scope = wilayah if wilayah in self._wilayah_list else "Ciayumajakuning"
 
         # Detect dominant category from docs for header label
         tipe_counts = {}
         for doc in docs[:3]:
-            d = cls._row_to_dict(doc)
+            d = self._row_to_dict(doc)
             t = d.get("tipe", "wisata")
             tipe_counts[t] = tipe_counts.get(t, 0) + 1
         dominant_tipe = max(tipe_counts, key=tipe_counts.get) if tipe_counts else "wisata"
@@ -914,9 +928,9 @@ class ChatbotService:
                     return False
 
         # 3. Strict Region Scope (Anti Cross-Wilayah)
-        if wilayah_filter and wilayah_filter in cls.WILAYAH_LIST:
+        if wilayah_filter and wilayah_filter in self._wilayah_list:
             target = wilayah_filter.lower()
-            for wilayah in cls.WILAYAH_LIST:
+            for wilayah in self._wilayah_list:
                 if wilayah.lower() == target:
                     continue
                 # Hindari false positive jika kata wilayah muncul di tengah kata lain
@@ -1417,7 +1431,16 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
             messages_count=len(messages), retrieved_docs=retrieved_docs,
         )
 
-    async def ask(self, payload: ChatRequest, db: AsyncSession, user_id: str | None = None, debug: bool = False) -> ChatResponse:
+    async def ask(
+        self,
+        payload: ChatRequest,
+        db: AsyncSession,
+        user_id: str | None = None,
+        debug: bool = False,
+    ) -> ChatResponse:
+        
+        # Load regions dynamically
+        await self._load_regions(db)
         """
         Method ask utama dengan arsitektur Intent-First:
         1. Classify intent (deterministic, tanpa LLM)
@@ -1559,21 +1582,28 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
             is_planning=is_planning,
         )
 
-        context = self.build_context(docs) if docs else ""
-        session_data = await self.get_or_create_session(
-            session_token=payload.session_token, db=db,
-            latitude=payload.latitude, longitude=payload.longitude,
-            wilayah=wilayah, user_id=user_id,
-        )
-        prompt = self.build_prompt(
-            user_message=payload.message,
-            context=context,
-            history=session_data["messages"],
-            wilayah=wilayah,
-            latitude=payload.latitude,
-            longitude=payload.longitude
-        )
-        answer = await self._generate_gemini_response(prompt, docs, db=db)
+        if intent == "info_specific":
+            # B. Database Query: Digunakan untuk pertanyaan yang jawabannya sudah tersedia secara terstruktur
+            # Langsung bypass LLM untuk mempercepat respons dan menghemat token
+            logger.info("Bypassing LLM for info_specific intent. Using direct DB query.")
+            answer = self._get_mock_fallback(payload.message, docs, intent=intent)
+        else:
+            context = self.build_context(docs) if docs else ""
+            session_data = await self.get_or_create_session(
+                session_token=payload.session_token, db=db,
+                latitude=payload.latitude, longitude=payload.longitude,
+                wilayah=wilayah, user_id=user_id,
+            )
+            prompt = self.build_prompt(
+                user_message=payload.message,
+                context=context,
+                history=session_data["messages"],
+                wilayah=wilayah,
+                latitude=payload.latitude,
+                longitude=payload.longitude
+            )
+            answer = await self._generate_gemini_response(prompt, docs, db=db)
+        
         
         # Fallback jika LLM gagal total
         is_llm_failed = False
