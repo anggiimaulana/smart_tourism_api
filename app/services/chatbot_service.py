@@ -928,9 +928,10 @@ class ChatbotService:
                     return False
 
         # 3. Strict Region Scope (Anti Cross-Wilayah)
-        if wilayah_filter and wilayah_filter in self._wilayah_list:
+        wilayah_list = ["Cirebon", "Indramayu", "Majalengka", "Kuningan"]
+        if wilayah_filter and wilayah_filter in wilayah_list:
             target = wilayah_filter.lower()
-            for wilayah in self._wilayah_list:
+            for wilayah in wilayah_list:
                 if wilayah.lower() == target:
                     continue
                 # Hindari false positive jika kata wilayah muncul di tengah kata lain
