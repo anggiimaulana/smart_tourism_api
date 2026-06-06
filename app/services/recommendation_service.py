@@ -268,6 +268,11 @@ class RecommendationService:
             if lat is None or lon is None:
                 continue
             distance = _haversine(payload.latitude, payload.longitude, float(lat), float(lon))
+            
+            # Filter berdasarkan radius jika ada
+            if payload.radius_km is not None and distance > payload.radius_km:
+                continue
+                
             proximity_score = max(0.0, 100.0 - distance)
             score = proximity_score + self._score_popular(item)
             scored.append((item, score))
@@ -329,6 +334,8 @@ class RecommendationService:
         payload: PlanningRequest,
         db: AsyncSession,
     ) -> PlanningResponse:
+        from app.services.chatbot_service import ChatbotService
+
         base_request = RecommendationRequest(
             user_id=payload.user_id,
             wilayah=payload.wilayah,
@@ -363,6 +370,30 @@ class RecommendationService:
 
             days.append(PlanningDayItem(hari=index + 1, tanggal=tanggal, items=day_items))
 
+        plan_response = PlanningResponse(
+            judul=f"Itinerary {payload.jumlah_hari} Hari",
+            wilayah=[w.value if hasattr(w, "value") else str(w) for w in payload.wilayah],
+            jumlah_hari=payload.jumlah_hari,
+            estimasi_budget=payload.budget_total,
+            hari=days,
+        )
+
+        try:
+            chatbot = ChatbotService()
+            data_str = plan_response.model_dump_json(exclude={"narasi"})
+            prompt = (
+                f"Kamu adalah SITA, asisten pariwisata. Buatkan narasi/paragraf singkat (maksimal 2 paragraf) "
+                f"yang menceritakan rencana perjalanan {payload.jumlah_hari} hari berikut. "
+                f"Sebutkan estimasi budget jika ada, gaya liburannya, dan rekomendasi waktu secara ringkas. "
+                f"Jangan me-listing ulang jadwal lengkapnya! Cukup beri gambaran kasar agar terlihat natural.\n\n"
+                f"Data rencana:\n{data_str}"
+            )
+            narasi = await chatbot._generate_gemini_response(prompt, db=db)
+            if narasi:
+                plan_response.narasi = narasi
+        except Exception:
+            pass
+
         if payload.user_id:
             tanggal_mulai = start_date
             tanggal_selesai = start_date + timedelta(days=payload.jumlah_hari - 1) if start_date else None
@@ -378,31 +409,19 @@ class RecommendationService:
                 """),
                 {
                     "user_id": payload.user_id,
-                    "judul": f"Planning {', '.join([w.value if hasattr(w, 'value') else str(w) for w in payload.wilayah])}",
-                    "wilayah": [w.value if hasattr(w, 'value') else str(w) for w in payload.wilayah],
+                    "judul": plan_response.judul,
+                    "wilayah": plan_response.wilayah,
                     "tanggal_mulai": tanggal_mulai,
                     "tanggal_selesai": tanggal_selesai,
                     "jumlah_orang": payload.jumlah_orang,
                     "budget_total": payload.budget_total,
                     "catatan": payload.catatan_tambahan,
-                    "items": PlanningResponse(
-                        judul="tmp",
-                        wilayah=[],
-                        jumlah_hari=payload.jumlah_hari,
-                        estimasi_budget=payload.budget_total,
-                        hari=days,
-                    ).model_dump_json(),
+                    "items": plan_response.model_dump_json(),
                 },
             )
             await db.commit()
 
-        return PlanningResponse(
-            judul=f"Itinerary {payload.jumlah_hari} Hari",
-            wilayah=[w.value if hasattr(w, "value") else str(w) for w in payload.wilayah],
-            jumlah_hari=payload.jumlah_hari,
-            estimasi_budget=payload.budget_total,
-            hari=days,
-        )
+        return plan_response
 
     async def track_history(self, payload: TrackHistoryRequest, db: AsyncSession) -> None:
         row = await db.execute(

@@ -13,12 +13,13 @@ class RecommendationRequest(BaseModel):
     tipe:      Literal["wisata","kuliner","nongkrong","all"] = "all"
     jumlah:    int                       = 10
     mode:      Literal["personal","popular","nearby"]        = "personal"
+    radius_km: Optional[float]          = None
  
     @field_validator("jumlah")
     @classmethod
     def jumlah_range(cls, v: int) -> int:
-        if not (1 <= v <= 20):
-            raise ValueError("Jumlah rekomendasi harus antara 1–20")
+        if not (1 <= v <= 50):
+            raise ValueError("Jumlah rekomendasi harus antara 1–50")
         return v
  
  
@@ -86,6 +87,7 @@ class PlanningResponse(BaseModel):
     jumlah_hari:       int
     estimasi_budget:   Optional[int]
     hari:              List[PlanningDayItem]
+    narasi:            Optional[str] = None
  
  
 class TrackHistoryRequest(BaseModel):
