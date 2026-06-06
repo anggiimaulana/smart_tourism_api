@@ -347,7 +347,7 @@ def classify_intent(message: str) -> dict:
     # === FINAL GATE: wajib ada tourism signal ===
     # Tolak jika tidak ada keyword pariwisata
     # PENGECUALIAN: Jika teks pendek (<= 3 kata, mungkin jawaban lokasi) atau menyebut wilayah didukung
-    is_short = len(normalized.split()) <= 3
+    is_short = len(normalized.split()) <= 5
     if not has_tourism and not has_supported and not is_short:
         result["intent"] = "out_of_scope_topic"
         result["matched_keyword"] = "no_tourism_signal"

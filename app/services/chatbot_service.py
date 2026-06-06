@@ -905,7 +905,8 @@ class ChatbotService:
             "maaf", "tidak ditemukan", "belum tersedia", "data belum ada", 
             "coba tanyakan", "belum bisa", "butuh bantuan", "lokasi", "posisi",
             "di luar wilayah", "di luar jangkauan", "tidak melayani", "hanya melayani",
-            "tidak memiliki informasi", "tidak ada informasi", "tidak tahu", "tidak dapat"
+            "tidak memiliki informasi", "tidak ada informasi", "tidak tahu", "tidak dapat",
+            "di mana", "dimana", "daerah mana", "sebutkan", "berada"
         ]):
             return True
 
