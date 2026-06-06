@@ -348,7 +348,7 @@ class RecommendationService:
         recommendation = await self.recommend(base_request, db)
         source_items = recommendation.items
 
-        per_day = max(2, math.ceil(len(source_items) / payload.jumlah_hari)) if source_items else 0
+        per_day = max(1, math.ceil(len(source_items) / payload.jumlah_hari)) if source_items else 0
         days: list[PlanningDayItem] = []
         start_date = None
         if payload.tanggal_mulai:
@@ -357,12 +357,12 @@ class RecommendationService:
             except ValueError:
                 start_date = None
 
+        extended_items = source_items * (math.ceil((payload.jumlah_hari * per_day) / max(1, len(source_items))) + 1) if source_items else []
+
         for index in range(payload.jumlah_hari):
             start = index * per_day
             end = start + per_day
-            day_items = source_items[start:end]
-            if not day_items and source_items:
-                day_items = source_items[-min(2, len(source_items)):]
+            day_items = extended_items[start:end]
 
             tanggal = None
             if start_date is not None:
