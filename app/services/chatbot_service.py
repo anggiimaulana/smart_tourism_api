@@ -928,9 +928,10 @@ class ChatbotService:
                     return False
 
         # 3. Strict Region Scope (Anti Cross-Wilayah)
-        if wilayah_filter and wilayah_filter in self._wilayah_list:
+        wilayah_list = ["Cirebon", "Indramayu", "Majalengka", "Kuningan"]
+        if wilayah_filter and wilayah_filter in wilayah_list:
             target = wilayah_filter.lower()
-            for wilayah in self._wilayah_list:
+            for wilayah in wilayah_list:
                 if wilayah.lower() == target:
                     continue
                 # Hindari false positive jika kata wilayah muncul di tengah kata lain
@@ -1458,6 +1459,17 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
             "farewell": get_farewell_response,
             "conversational": get_unknown_intent_response,
         })
+        
+        if intent == "planning":
+            answer = (
+                "Wah, sepertinya Sobat Jalan ingin membuat rencana liburan ya! ✨\n\n"
+                "Untuk hasil yang lebih lengkap dan rapi, SITA sangat menyarankan Sobat Jalan untuk menggunakan fitur **Rekomendasi Rencana (Planning)** di menu utama. "
+                "Di sana, SITA bisa membuatkan jadwal harian terperinci beserta kalkulasi budget-nya secara otomatis! 🚀\n\n"
+                "Tapi kalau Sobat Jalan hanya ingin tanya-tanya tempat wisata atau info tertentu, silakan tanyakan langsung di sini ya! 😉"
+            )
+            return await self._build_and_save_response(
+                payload, db, answer, wilayah=None, referensi=[], user_id=user_id,
+            )
 
         if intent in STATIC_INTENT_MAP:
             answer = STATIC_INTENT_MAP[intent]()
