@@ -855,7 +855,7 @@ class ChatbotService:
         lines = [f"{emoji} Berikut rekomendasi **{label}** di **{scope}** dari data yang tersedia:"]
 
         for i, doc in enumerate(docs[:3], 1):
-            d = cls._row_to_dict(doc)
+            d = self._row_to_dict(doc)
             nama = d.get("nama", "-")
             maps = d.get("link_google_maps") or "Tidak tersedia"
             area = d.get("wilayah") or "-"
@@ -1472,14 +1472,14 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
             "unknown": get_unknown_intent_response,
         }
 
-        # Jika LLM mati, gunakan static response untuk semuanya
-        if not LLM_ENABLED:
-            STATIC_INTENT_MAP.update({
-                "identity": get_identity_response,
-                "greeting": get_greeting_response,
-                "thanks": get_thanks_response,
-                "farewell": get_farewell_response,
-            })
+        # Selalu gunakan static response untuk intent dasar agar tidak boros token
+        STATIC_INTENT_MAP.update({
+            "identity": get_identity_response,
+            "greeting": get_greeting_response,
+            "thanks": get_thanks_response,
+            "farewell": get_farewell_response,
+            "conversational": get_unknown_intent_response,
+        })
 
         if intent in STATIC_INTENT_MAP:
             answer = STATIC_INTENT_MAP[intent]()
