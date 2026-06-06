@@ -967,7 +967,10 @@ class ChatbotService:
         for provider_name, call_fn in providers:
             logger.info(f"Attempting LLM provider: {provider_name}")
             try:
-                result = await asyncio.to_thread(call_fn, prompt)
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(call_fn, prompt), 
+                    timeout=120.0
+                )
                 if result:
                     logger.info(f"LLM provider {provider_name} returned a response")
                     return result
@@ -1049,7 +1052,8 @@ class ChatbotService:
             try:
                 response = GEMINI_MODEL.generate_content(
                     prompt,
-                    generation_config={"max_output_tokens": 2048}
+                    generation_config={"max_output_tokens": 2048},
+                    request_options={"timeout": 120.0}
                 )
                 return response.text
             except ResourceExhausted:
@@ -1351,8 +1355,7 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
                 )
 
         return None
-
-        return None  
+ 
 
     # ========================================================================
     # Metode Utama (Menggunakan Subtask 2 & 3)

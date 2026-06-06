@@ -1,17 +1,8 @@
 """
-Intent Classifier untuk SITA Chatbot.
+Intent Classifier untuk SITA Chatbot - REVISED VERSION
 
 Klasifikasi intent secara deterministik (tanpa LLM) untuk routing query
 sebelum masuk ke RAG pipeline. Ini mencegah query out-of-scope masuk ke DB.
-
-Intent yang tersedia:
-- identity      : pertanyaan tentang SITA (siapa kamu, dll)
-- greeting       : sapaan (halo, hai, dll)
-- recommendation : rekomendasi wisata/kuliner/nongkrong
-- info_specific  : info detail tempat tertentu
-- out_of_scope_location : lokasi di luar Ciayumajakuning
-- out_of_scope_topic    : topik non-pariwisata
-- dangerous      : konten berbahaya/ilegal
 """
 
 from __future__ import annotations
@@ -91,6 +82,7 @@ PLANNING_KEYWORDS = [
 ]
 
 # --- Info specific keywords ---
+# CATATAN REVISI: Kata "di" dihapus agar tidak bentrok dengan nama tempat/daerah (cth: "di cirebon")
 INFO_SPECIFIC_KEYWORDS = [
     "jam buka", "jam tutup", "jam operasional", "buka jam", "tutup jam",
     "harga tiket", "tiket masuk", "biaya masuk", "berapa harga",
@@ -134,8 +126,6 @@ IRRELEVANT_TOPICS = [
     "sistem atm", "atm sederhana",
 ]
 
-
-
 # --- Location: Indonesian provinces & major cities OUTSIDE Ciayumajakuning ---
 OUT_OF_SCOPE_PROVINCES = {
     "aceh", "sumatera utara", "sumatera barat", "riau", "jambi",
@@ -166,7 +156,6 @@ OUT_OF_SCOPE_CITIES = {
 
 # --- International locations ---
 INTERNATIONAL_LOCATIONS = {
-    # Countries
     "amerika", "usa", "united states", "inggris", "england", "british",
     "prancis", "france", "paris", "jerman", "germany", "berlin",
     "italia", "italy", "roma", "rome", "spanyol", "spain", "barcelona",
@@ -189,11 +178,9 @@ INTERNATIONAL_LOCATIONS = {
     "kanada", "canada", "meksiko", "mexico",
     "new york", "los angeles", "london", "hawaii",
     "maldives", "maladewa", "swiss", "switzerland",
-    "kutub utara", "kutub selatan", "antartika", "antarctica",
-    # Famous international destinations
     "eiffel", "colosseum", "taj mahal", "great wall",
     "niagara", "grand canyon", "santorini", "mykonos",
-    "bora bora", "maldives",
+    "bora bora",
 }
 
 # --- Indonesian destinations outside scope ---
@@ -206,40 +193,31 @@ OUT_OF_SCOPE_DESTINATIONS = {
     "tangkuban perahu", "kawah putih", "nusa penida",
     "gili trawangan", "gili meno", "gili air",
     "ubud", "kuta", "seminyak", "sanur", "tanah lot",
-    "uluwatu", "tegallalang",
+    "luwatu", "tegallalang",
 }
 
 
 def _normalize_text(text: str) -> str:
-    """Normalize text: lowercase, strip punctuation, collapse whitespace, and resolve aliases."""
     if not text:
         return ""
     t = re.sub(r'[^\w\s]', '', text.lower())
     t = re.sub(r'\s+', ' ', t).strip()
-    
-    # Resolve aliases
+
     aliases = {
-        # Indramayu
         "imy": "indramayu", "imyu": "indramayu", "imkot": "indramayu", "kota mangga": "indramayu",
-        # Cirebon
         "crb": "cirebon", "cerbon": "cirebon", "cirbon": "cirebon", "cebron": "cirebon", "kota udang": "cirebon",
-        # Kuningan
         "kningan": "kuningan", "kng": "kuningan", "kota kuda": "kuningan",
-        # Majalengka
         "maja lengka": "majalengka", "mjk": "majalengka", "kota angin": "majalengka",
     }
-    
-    # Replace whole word aliases
+
     for alias, real_name in aliases.items():
         if alias in t:
-            # use regex to replace whole words only to avoid replacing substrings
             t = re.sub(rf'\b{alias}\b', real_name, t)
-            
+
     return t
 
 
 def _text_contains_any(text: str, keywords) -> str | None:
-    """Check if text contains any keyword. Return the matched keyword or None."""
     for kw in keywords:
         if kw in text:
             return kw
@@ -247,7 +225,6 @@ def _text_contains_any(text: str, keywords) -> str | None:
 
 
 def _has_supported_region(text: str) -> bool:
-    """Check if text explicitly mentions a supported Ciayumajakuning region."""
     for region in SUPPORTED_REGIONS:
         if region in text:
             return True
@@ -255,26 +232,18 @@ def _has_supported_region(text: str) -> bool:
 
 
 def _detect_out_of_scope_location(text: str) -> str | None:
-    """
-    Detect if user mentions ANY location outside Ciayumajakuning.
-    Returns the detected out-of-scope location name, or None if clean.
-    """
-    # Check international locations
     match = _text_contains_any(text, INTERNATIONAL_LOCATIONS)
     if match:
         return match
 
-    # Check Indonesian provinces outside scope
     match = _text_contains_any(text, OUT_OF_SCOPE_PROVINCES)
     if match:
         return match
 
-    # Check Indonesian cities outside scope
     match = _text_contains_any(text, OUT_OF_SCOPE_CITIES)
     if match:
         return match
 
-    # Check famous destinations outside scope
     match = _text_contains_any(text, OUT_OF_SCOPE_DESTINATIONS)
     if match:
         return match
@@ -282,185 +251,107 @@ def _detect_out_of_scope_location(text: str) -> str | None:
     return None
 
 
-def _detect_unknown_location_by_preposition(text: str) -> str | None:
-    """
-    Fallback: detect unknown locations via preposition patterns.
-    Catches 'di finlandia', 'ke kamerun', 'di kamboja', etc. that aren't in any keyword list.
-    Only triggers if the word after the preposition is NOT a supported region
-    and NOT a generic/common Indonesian word.
-    """
-    # Common non-location words that follow "di" or "ke" in normal speech
-    NON_LOCATION_WORDS = {
-        "sini", "sana", "situ", "sana", "mana", "sekitar", "dekat", "atas", "bawah",
-        "dalam", "luar", "antara", "samping", "depan", "belakang", "tengah",
-        "rumah", "kantor", "sekolah", "kampus", "hotel", "mall",
-        "tempat", "area", "wilayah", "daerah", "kawasan", "zona",
-        "pagi", "siang", "sore", "malam", "hari", "minggu",
-        "wisata", "kuliner", "nongkrong", "cafe", "kafe", "restoran", "warung",
-        "pantai", "gunung", "danau", "hutan", "taman", "museum",
-        "budget", "bawah", "atas", "sekitar", "antara",
-        # Generic adjectives/words
-        "sana", "mana", "situ", "sini",
-    }
-
-    # Pattern: "di/ke [word]" — extract the word after preposition
-    pattern = r'\b(?:di|ke)\s+([a-z]{3,})\b'
-    matches = re.findall(pattern, text)
-
-    for loc in matches:
-        # Skip supported regions
-        if loc in SUPPORTED_REGIONS:
-            continue
-        # Skip non-location words
-        if loc in NON_LOCATION_WORDS:
-            continue
-        # Skip words that are part of tourism keywords (e.g. "ke pantai")
-        if any(loc in kw for kw in TOURISM_KEYWORDS):
-            continue
-        # Skip very short words or common words
-        if len(loc) < 4:
-            continue
-
-        # This is likely an unknown location name
-        return loc
-
-    return None
-
-
 def classify_intent(message: str) -> dict:
     """
-    Classify user message intent deterministically.
-    
-    Returns:
-        dict with keys:
-        - intent: str (identity|greeting|thanks|farewell|recommendation|
-        info_specific|out_of_scope_location|out_of_scope_topic|
-        dangerous|unknown)
-        - matched_keyword: str | None
-        - has_tourism_intent: bool
-        - detected_location_issue: str | None
+    Classify user message intent deterministik.
     """
     normalized = _normalize_text(message)
-    
+
+    # Menggunakan fallback "out_of_scope_topic" sebagai inisialisasi default awal aman
     result = {
-        "intent": "conversational",
+        "intent": "out_of_scope_topic",
         "matched_keyword": None,
         "has_tourism_intent": False,
         "detected_location_issue": None,
     }
 
-    # ═══════════════════════════════════════════════════════
-    # TAMBAHKAN PERBAIKAN DI SINI (CEGAT OPERASI MATEMATIKA / ANGKA)
-    # ═══════════════════════════════════════════════════════
-    # Jika input mentah hanya berisi angka, spasi, dan simbol matematika dasar (+, -, *, /, =, x, ?)
-    if re.match(r'^[0-9\s\+\-\*\/\=\?xX]+$', message.strip()):
-        result["intent"] = "out_of_scope_topic"
-        result["matched_keyword"] = "operasi_matematika"
-        return result
-    # ═══════════════════════════════════════════════════════
-
     has_supported = _has_supported_region(normalized)
-    
-    # Check tourism intent (used for compound queries)
     has_tourism = any(kw in normalized for kw in TOURISM_KEYWORDS)
-    
-    
-    # === PRIORITY 1: Dangerous Keywords (Paling Atas) ===
+
+    # === PRIORITY 1: Dangerous ===
     match = _text_contains_any(normalized, DANGEROUS_KEYWORDS)
     if match:
         result["intent"] = "dangerous"
         result["matched_keyword"] = match
         return result
 
-    # === PRIORITY 2: Out of Scope Topic (Finansial, Tugas Sekolah, Politik) ===
+    # === PRIORITY 2: Out of scope topic (eksplisit) ===
     match = _text_contains_any(normalized, IRRELEVANT_TOPICS)
     if match:
         result["intent"] = "out_of_scope_topic"
         result["matched_keyword"] = match
         return result
-    
-    # === PRIORITY 3: Out-of-scope LOCATION (known list) ===
-    # If user ALSO mentions a supported region, allow through
-    # e.g. "liburan ke cirebon dari jakarta" → destination is cirebon, allow it
+
+    # === PRIORITY 3: Out-of-scope location ===
     oos_location = _detect_out_of_scope_location(normalized)
     if oos_location and not has_supported:
         result["intent"] = "out_of_scope_location"
         result["matched_keyword"] = oos_location
         result["detected_location_issue"] = oos_location
         return result
-    
-    # === PRIORITY 4: Out-of-scope TOPIC ===
-    match = _text_contains_any(normalized, IRRELEVANT_TOPICS)
+
+    # === PRIORITY 4: Identity ===
+    match = _text_contains_any(normalized, IDENTITY_KEYWORDS)
     if match:
-        if has_tourism:
-            pass  # Allow — tourism intent takes priority (it will default to Ciayumajakuning later)
-        else:
-            result["intent"] = "out_of_scope_topic"
-            result["matched_keyword"] = match
-            return result
-    
-    # === PRIORITY 5: Pure greeting (no tourism intent) ===
+        result["intent"] = "identity"
+        result["matched_keyword"] = match
+        return result
+
+    # === PRIORITY 5: Help ===
+    match = _text_contains_any(normalized, HELP_KEYWORDS)
+    if match and not has_tourism:
+        result["intent"] = "identity"
+        result["matched_keyword"] = match
+        return result
+
+    # === PRIORITY 6: Greeting (hanya jika tidak ada tourism intent) ===
     match = _text_contains_any(normalized, GREETING_KEYWORDS)
     if match and not has_tourism:
         result["intent"] = "greeting"
         result["matched_keyword"] = match
         return result
-        
-    # === PRIORITY 5.3: Identity (no tourism intent) ===
-    match = _text_contains_any(normalized, IDENTITY_KEYWORDS)
-    if match and not has_tourism:
-        result["intent"] = "identity"
-        result["matched_keyword"] = match
-        return result
-        
-    # === PRIORITY 5.5: Help / How-to (no tourism intent) ===
-    match = _text_contains_any(normalized, HELP_KEYWORDS)
-    if match and not has_tourism:
-        result["intent"] = "identity" # Route to static identity response which explains how to use SITA
-        result["matched_keyword"] = match
-        return result
-    
-    # === PRIORITY 6: Thanks ===
+
+    # === PRIORITY 7: Thanks ===
     match = _text_contains_any(normalized, THANKS_KEYWORDS)
     if match and not has_tourism:
         result["intent"] = "thanks"
         result["matched_keyword"] = match
         return result
-    
-    # === PRIORITY 7: Farewell ===
+
+    # === PRIORITY 8: Farewell ===
     match = _text_contains_any(normalized, FAREWELL_KEYWORDS)
     if match and not has_tourism:
         result["intent"] = "farewell"
         result["matched_keyword"] = match
         return result
+
+    # ══════════════════════════════════════════════════════════════
+    # REVISI STRUKTUR: PLANNING DINAUKKAN KE ATAS INFO SPECIFIC
+    # ══════════════════════════════════════════════════════════════
     
-    # === PRIORITY 8: Info specific ===
-    match = _text_contains_any(normalized, INFO_SPECIFIC_KEYWORDS)
-    if match:
-        result["intent"] = "info_specific"
-        result["matched_keyword"] = match
-        return result
-        
-    # === PRIORITY 8.5: Planning / Itinerary ===
+    # === PRIORITY 9: Planning / Itinerary ===
     match = _text_contains_any(normalized, PLANNING_KEYWORDS)
     if match:
-        # Planning is a form of tourism intent
         result["intent"] = "planning"
         result["matched_keyword"] = match
         result["has_tourism_intent"] = True
         return result
-    
-    # (Priority 9 removed: overly aggressive preposition check blocked valid kecamatans)
-    
-    # === PRIORITY 10: Valid recommendation ===
-    if has_tourism:
-        result["intent"] = "recommendation"
-        result["matched_keyword"] = _text_contains_any(normalized, TOURISM_KEYWORDS)
+
+    # === PRIORITY 10: Info specific ===
+    match = _text_contains_any(normalized, INFO_SPECIFIC_KEYWORDS)
+    if match and has_tourism:
+        result["intent"] = "info_specific"
+        result["matched_keyword"] = match
         return result
-    
-    # === DEFAULT: fallback to conversational RAG ===
-    # Instead of blocking unknown inputs, we route them to the RAG LLM
-    # so the bot can maintain natural conversational flow (e.g. answering "di jatibarang" to a follow-up question)
-    result["intent"] = "conversational"
-    result["has_tourism_intent"] = False
+
+    # === FINAL GATE: wajib ada tourism signal ===
+    # Apapun inputnya, kalau tidak ada keyword pariwisata → tolak
+    if not has_tourism:
+        result["intent"] = "out_of_scope_topic"
+        result["matched_keyword"] = "no_tourism_signal"
+        return result
+
+    # Lolos semua pengecekan dan ada tourism signal → recommendation
+    result["intent"] = "recommendation"
+    result["has_tourism_intent"] = True
     return result
