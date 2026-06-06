@@ -1415,7 +1415,7 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
         messages.append({"role": "user", "content": payload.message, "timestamp": self._timestamp()})
         messages.append({"role": "assistant", "content": answer, "timestamp": self._timestamp()})
 
-        wilayah_to_save = wilayah if wilayah in self.WILAYAH_LIST else None
+        wilayah_to_save = wilayah if wilayah in self._wilayah_list else None
         await self.save_session(token=session_token, messages=messages, wilayah=wilayah_to_save, db=db)
 
         retrieved_docs = None
