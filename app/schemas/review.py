@@ -1,7 +1,5 @@
 from pydantic import BaseModel, Field, field_validator
-from pydantic_core import CoreBlankError
 from typing import Optional
-from pydantic_core.core_schema import FieldValidatorFunction
 
 class ReviewCreate(BaseModel):
     # Front-End wajib mengirimkan UUID tempat wisata/kuliner/nongkrong
