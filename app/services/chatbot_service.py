@@ -905,7 +905,8 @@ class ChatbotService:
             "maaf", "tidak ditemukan", "belum tersedia", "data belum ada", 
             "coba tanyakan", "belum bisa", "butuh bantuan", "lokasi", "posisi",
             "di luar wilayah", "di luar jangkauan", "tidak melayani", "hanya melayani",
-            "tidak memiliki informasi", "tidak ada informasi", "tidak tahu", "tidak dapat"
+            "tidak memiliki informasi", "tidak ada informasi", "tidak tahu", "tidak dapat",
+            "di mana", "dimana", "daerah mana", "sebutkan", "berada"
         ]):
             return True
 
@@ -1391,6 +1392,11 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
         history = session_data["messages"]
 
         messages = list(history)
+        
+        # Tambahkan pengingat feedback setiap kelipatan 10 pesan (5 interaksi)
+        if len(messages) > 0 and len(messages) % 10 == 0:
+            answer += "\n\n*(Sobat Jalan, kalau jawaban SITA ngebantu, jangan lupa berikan penilaian jempol di bawah pesan ini ya! 👍)*"
+            
         messages.append({"role": "user", "content": payload.message, "timestamp": self._timestamp()})
         messages.append({"role": "assistant", "content": answer, "timestamp": self._timestamp()})
 
