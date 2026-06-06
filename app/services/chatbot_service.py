@@ -587,33 +587,10 @@ class ChatbotService:
             docs = result.fetchall()
 
         # 4. Fallback terakhir: ambil data populer di wilayah + tipe
-        if not docs:
-            tipe_clause = f"AND tipe = :tipe" if tipe_filter else ""
-            budget_clause = ""
-            if budget_min is not None:
-                budget_clause += " AND COALESCE(harga_max, harga_min, 0) >= :budget_min"
-            if budget_max is not None:
-                budget_clause += " AND COALESCE(harga_min, 0) <= :budget_max"
-            wilayah_clause = "WHERE wilayah ILIKE :wilayah" if wilayah_filter else "WHERE 1=1"
-            params_pop = {"limit": top_k}
-            if wilayah_filter:
-                params_pop["wilayah"] = wilayah_filter
-            if tipe_filter:
-                params_pop["tipe"] = tipe_filter
-            if budget_min is not None:
-                params_pop["budget_min"] = budget_min
-            if budget_max is not None:
-                params_pop["budget_max"] = budget_max
-            
-            sql_popular = text(f"""
-                SELECT *
-                FROM v_all_tempat
-                {wilayah_clause} {tipe_clause} {budget_clause}
-                ORDER BY rating_google DESC NULLS LAST
-                LIMIT :limit
-            """)
-            result = await db.execute(sql_popular, params_pop)
-            docs = result.fetchall()
+        # DIHAPUS karena user komplain jika mencari lokasi spesifik (misal Losarang) namun tidak ada, 
+        # sistem malah memberikan rekomendasi acak yang membuat bot terlihat "sok tahu" dan "ngasih list padahal gaada".
+        # Biarkan docs kosong agar LLM bisa menjawab jujur bahwa data tidak ditemukan.
+        pass
 
         # 5. Distribusi merata antar wilayah jika query multi-wilayah (tanpa filter)
         if not wilayah_filter and docs and len(docs) > 1:
@@ -1470,6 +1447,21 @@ Ada lagi yang bisa SITA bantu seputar Ciayumajakuning?"""
         matched_kw = intent_result.get("matched_keyword")
 
         logger.info(f"Intent classified: {intent} (keyword: {matched_kw})")
+
+        # ═══════════════════════════════════════════════════════
+        # STEP 1.5: Intercept "terdekat" without location
+        # ═══════════════════════════════════════════════════════
+        if payload.latitude is None and payload.longitude is None:
+            msg_lower = payload.message.lower()
+            if "terdekat" in msg_lower or "dekat sini" in msg_lower or "sekitar sini" in msg_lower:
+                answer = (
+                    "Halo Sobat Jalan! 🙋‍♀️\n\n"
+                    "SITA belum tahu posisimu saat ini. Untuk memberikan rekomendasi wisata dan nongkrong yang *paling dekat* dan pas buat kamu, "
+                    "tolong beritahu SITA, kamu berada di daerah atau kecamatan mana sekarang? 📍"
+                )
+                return await self._build_and_save_response(
+                    payload, db, answer, wilayah=None, referensi=[], user_id=user_id,
+                )
 
         # ═══════════════════════════════════════════════════════
         # STEP 2: Route static intents (NO DB access)
