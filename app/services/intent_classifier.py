@@ -79,10 +79,11 @@ PLANNING_KEYWORDS = [
     "planning", "planing", "jadwal", "itinerary", "rencana liburan",
     "rencana wisata", "plan", "susun jadwal", "buatkan rute",
     "buatkan jadwal", "rekomendasi jadwal", "rencana perjalanan",
+    "liburan berapa hari", "wisata berapa hari", "mau liburan",
+    "perjalanan", "trip",
 ]
 
 # --- Info specific keywords ---
-# CATATAN REVISI: Kata "di" dihapus agar tidak bentrok dengan nama tempat/daerah (cth: "di cirebon")
 INFO_SPECIFIC_KEYWORDS = [
     "jam buka", "jam tutup", "jam operasional", "buka jam", "tutup jam",
     "harga tiket", "tiket masuk", "biaya masuk", "berapa harga",
@@ -251,18 +252,48 @@ def _detect_out_of_scope_location(text: str) -> str | None:
     return None
 
 
+def _extract_duration_days(text: str) -> int:
+    """
+    Ekstrak durasi perjalanan dari teks user.
+    Contoh: "2 hari", "tiga hari", "seminggu" → return angka hari (int).
+    Default: 1 jika tidak ditemukan.
+    """
+    # Cek kata angka tulisan
+    word_map = {
+        "satu": 1, "dua": 2, "tiga": 3, "empat": 4, "lima": 5,
+        "enam": 6, "tujuh": 7, "sepekan": 7, "seminggu": 7,
+    }
+    for word, val in word_map.items():
+        if word in text:
+            return val
+
+    # Cek angka diikuti "hari" atau "malam"
+    match = re.search(r'(\d+)\s*(?:hari|malam|day)', text)
+    if match:
+        return min(int(match.group(1)), 7)  # cap 7 hari
+
+    return 1  # default 1 hari jika tidak disebutkan
+
+
 def classify_intent(message: str) -> dict:
     """
     Classify user message intent deterministik.
+
+    Returns dict dengan keys:
+      - intent (str)
+      - matched_keyword (str | None)
+      - has_tourism_intent (bool)
+      - detected_location_issue (str | None)
+      - durasi_hari (int) — hanya relevan untuk intent "planning"
     """
     normalized = _normalize_text(message)
 
-    # Menggunakan fallback "out_of_scope_topic" sebagai inisialisasi default awal aman
     result = {
         "intent": "out_of_scope_topic",
         "matched_keyword": None,
         "has_tourism_intent": False,
         "detected_location_issue": None,
+        "durasi_hari": 1,
     }
 
     has_supported = _has_supported_region(normalized)
@@ -325,16 +356,14 @@ def classify_intent(message: str) -> dict:
         result["matched_keyword"] = match
         return result
 
-    # ══════════════════════════════════════════════════════════════
-    # REVISI STRUKTUR: PLANNING DINAUKKAN KE ATAS INFO SPECIFIC
-    # ══════════════════════════════════════════════════════════════
-    
     # === PRIORITY 9: Planning / Itinerary ===
     match = _text_contains_any(normalized, PLANNING_KEYWORDS)
     if match:
+        durasi = _extract_duration_days(normalized)
         result["intent"] = "planning"
         result["matched_keyword"] = match
         result["has_tourism_intent"] = True
+        result["durasi_hari"] = durasi
         return result
 
     # === PRIORITY 10: Info specific ===
@@ -345,15 +374,13 @@ def classify_intent(message: str) -> dict:
         return result
 
     # === FINAL GATE: wajib ada tourism signal ===
-    # Tolak jika tidak ada keyword pariwisata
-    # PENGECUALIAN: Jika teks pendek (<= 3 kata, mungkin jawaban lokasi) atau menyebut wilayah didukung
     is_short = len(normalized.split()) <= 5
     if not has_tourism and not has_supported and not is_short:
         result["intent"] = "out_of_scope_topic"
         result["matched_keyword"] = "no_tourism_signal"
         return result
 
-    # Lolos semua pengecekan dan ada tourism signal → recommendation
+    # Lolos semua pengecekan → recommendation
     result["intent"] = "recommendation"
     result["has_tourism_intent"] = True
     return result

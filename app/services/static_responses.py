@@ -6,6 +6,7 @@ didefinisikan di sini agar konsisten dan mudah dikelola.
 """
 
 from __future__ import annotations
+import random
 
 
 def get_identity_response() -> str:
@@ -27,9 +28,9 @@ def get_identity_response() -> str:
     )
 
 
-def get_greeting_response() -> str:
-    """Jawaban untuk sapaan."""
-    return (
+# Beberapa variasi sapaan agar tidak monoton
+_GREETING_VARIANTS = [
+    (
         "Halo! 👋 Selamat datang di **SITA** — teman jalan-jalanmu di Ciayumajakuning!\n\n"
         "SITA siap nemenin kamu cari info seru tentang:\n"
         "- 🏖️ Tempat wisata kece\n"
@@ -37,7 +38,26 @@ def get_greeting_response() -> str:
         "- ☕ Tempat nongkrong & cafe hits\n\n"
         "di wilayah **Cirebon, Indramayu, Majalengka, dan Kuningan**.\n\n"
         "Lagi pengen jalan-jalan ke mana nih hari ini? 😊"
-    )
+    ),
+    (
+        "Hai! 😄 Seneng banget kamu mampir ke SITA!\n\n"
+        "Mau healing, nyari kuliner, atau explore tempat baru di **Ciayumajakuning**? "
+        "SITA ada buat bantu kamu nemuin destinasi yang paling pas.\n\n"
+        "Cerita dong, lagi pengen nyari apa? 🗺️"
+    ),
+    (
+        "Halo Sobat Jalan! 👋 SITA siap menemanimu!\n\n"
+        "Kalau kamu lagi cari rekomendasi wisata, kuliner, atau cafe kekinian "
+        "di **Cirebon, Indramayu, Majalengka, atau Kuningan**, tanya SITA aja — "
+        "SITA punya banyak info seru buat kamu!\n\n"
+        "Mau mulai dari mana? 😊"
+    ),
+]
+
+
+def get_greeting_response() -> str:
+    """Jawaban untuk sapaan — dipilih secara acak agar tidak monoton."""
+    return random.choice(_GREETING_VARIANTS)
 
 
 def get_thanks_response() -> str:
@@ -64,7 +84,7 @@ def get_out_of_scope_location_response(detected_location: str | None = None) -> 
     location_text = ""
     if detected_location:
         location_text = f" (terdeteksi: **{detected_location}**)"
-    
+
     return (
         "🚫 **Maaf, SITA hanya bisa membantu untuk wilayah Ciayumajakuning.**\n\n"
         f"Pertanyaan kamu menyebut lokasi di luar cakupan SITA{location_text}. "
@@ -84,9 +104,9 @@ def get_out_of_scope_location_response(detected_location: str | None = None) -> 
 def get_out_of_scope_topic_response(detected_topic: str | None = None) -> str:
     """Jawaban untuk pertanyaan topik di luar pariwisata."""
     topic_text = ""
-    if detected_topic:
+    if detected_topic and detected_topic != "no_tourism_signal":
         topic_text = f" (terdeteksi topik: *{detected_topic}*)"
-    
+
     return (
         "🚫 **Maaf, SITA hanya bisa menjawab pertanyaan seputar pariwisata, "
         "kuliner, dan tempat nongkrong di Ciayumajakuning.**\n\n"
@@ -131,7 +151,7 @@ def get_no_data_response(wilayah: str | None = None, category: str | None = None
     """Jawaban ketika tidak ada data yang cocok di database."""
     scope = wilayah or "Ciayumajakuning"
     cat_text = f" untuk kategori **{category}**" if category else ""
-    
+
     return (
         f"😔 Yah sayang banget, SITA belum nemu data yang pas{cat_text} "
         f"di **{scope}** buat pertanyaan kamu nih.\n\n"
@@ -146,7 +166,7 @@ def get_no_data_response(wilayah: str | None = None, category: str | None = None
 def build_followup_suggestions(wilayah: str | None = None) -> str:
     """Buat contoh pertanyaan lanjutan yang relevan dengan wilayah aktif."""
     VALID_WILAYAH = ("Indramayu", "Cirebon", "Majalengka", "Kuningan")
-    
+
     if wilayah and wilayah in VALID_WILAYAH:
         return (
             "\n\n**Coba tanya SITA hal lain seperti:**\n"
@@ -154,7 +174,7 @@ def build_followup_suggestions(wilayah: str | None = None) -> str:
             f"- \"Kuliner khas {wilayah} yang enak\"\n"
             f"- \"Tempat nongkrong yang nyaman di {wilayah}\""
         )
-    
+
     return (
         "\n\n**Coba tanya SITA hal lain seperti:**\n"
         "- \"Rekomendasi wisata alam di Indramayu\"\n"
