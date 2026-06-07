@@ -164,7 +164,6 @@ class ChatbotService:
     def __init__(self):
         self._wilayah_list = []
         self._supported_regions = set()
-
     async def _load_regions(self, db: AsyncSession):
         """Memuat data wilayah dari tabel regions agar tidak hardcoded."""
         if self._wilayah_list:
@@ -390,6 +389,10 @@ class ChatbotService:
             else:
                 query_str = "wisata | kuliner | nongkrong"
         else:
+            query_str = "wisata | kuliner | nongkrong"
+            
+        # Double check: jika query_str ternyata kosong atau bermasalah karena glitch karakter
+        if not query_str.strip() or query_str.strip() == "|":
             query_str = "wisata | kuliner | nongkrong"
 
         if not query_str.strip() or query_str.strip() == "|":
@@ -914,7 +917,7 @@ class ChatbotService:
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.7,
-                max_tokens=2048,
+                max_tokens=1024,
             )
             return response.choices[0].message.content
         except Exception as e:

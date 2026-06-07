@@ -84,6 +84,7 @@ PLANNING_KEYWORDS = [
 ]
 
 # --- Info specific keywords ---
+# CATATAN REVISI: Kata "di" dihapus agar tidak bentrok dengan nama tempat/daerah (cth: "di cirebon")
 INFO_SPECIFIC_KEYWORDS = [
     "jam buka", "jam tutup", "jam operasional", "buka jam", "tutup jam",
     "harga tiket", "tiket masuk", "biaya masuk", "berapa harga",

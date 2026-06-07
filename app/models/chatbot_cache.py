@@ -10,7 +10,11 @@ class ChatbotCache(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     session_token = Column(String(255), nullable=True) # Tambahkan session_token
+<<<<<<< HEAD
     query_hash = Column(String(128), index=True, nullable=False) 
+=======
+    query_hash = Column(String(128), index=True, nullable=False)
+>>>>>>> origin/main
     query_normalized = Column(Text, nullable=False)
     answer = Column(JSONB, nullable=False)
     hit_count = Column(Integer, nullable=False, default=0)
