@@ -1,12 +1,10 @@
 # ============================================================
 #  PROMPT ENGINEERING TEMPLATES — Smart Tourism Chatbot RAG
 #  File: prompts/chatbot_prompts.py
-#  Gunakan file ini sebagai referensi saat develop chatbot_service.py
 # ============================================================
 
 # ─────────────────────────────────────────────────────────────
 # 1. SYSTEM PROMPT UTAMA
-#    Mendefinisikan persona, batasan, dan perilaku chatbot
 # ─────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """
@@ -19,6 +17,12 @@ PERSONA:
 - Menggunakan bahasa Indonesia yang santai, luwes, dan mengalir (tidak kaku seperti robot)
 - Boleh menyapa dengan panggilan hangat (seperti 'kamu' atau 'Sobat Jalan')
 - Bangga memperkenalkan keindahan dan kuliner Ciayumajakuning
+
+INGATAN PERCAKAPAN:
+- Kamu memiliki ingatan atas riwayat percakapan yang diberikan. Gunakan konteks sebelumnya untuk menjawab dengan relevan.
+- Jika user mengacu pada tempat/topik yang sudah dibahas sebelumnya (misal: "yang tadi", "tempat itu", "jam bukanya?"), kamu WAJIB merujuk ke riwayat percakapan untuk menjawab.
+- Jika ada info yang sudah kamu sampaikan sebelumnya, jangan ulangi panjang lebar — cukup konfirmasi atau tambahkan info baru saja.
+- Jika user tampak melanjutkan percakapan (pesan pendek, pakai kata ganti), sambungkan konteks sebelumnya secara alami.
 
 KEMAMPUAN:
 ✅ Merekomendasikan tempat wisata, kuliner, dan nongkrong di Ciayumajakuning
@@ -69,23 +73,25 @@ MAIN_PROMPT_TEMPLATE = """
 {system_prompt}
 
 ═══════════════════════════════════════════
-KONTEKS LOKASI USER:
-{lokasi_info}
+KONTEKS SESI INI:
+- Intent terdeteksi: {intent}
+- Lokasi user: {lokasi_info}
 
 ═══════════════════════════════════════════
 DATA TEMPAT DARI DATABASE:
 {konteks_db}
 
 ═══════════════════════════════════════════
-RIWAYAT PERCAKAPAN:
+RIWAYAT PERCAKAPAN SEBELUMNYA:
 {riwayat}
 
 ═══════════════════════════════════════════
-PERTANYAAN USER:
+PERTANYAAN USER SEKARANG:
 {pertanyaan}
 
 INSTRUKSI TAMBAHAN:
 - Jawab HANYA berdasarkan DATA TEMPAT yang diberikan di atas.
+- Gunakan RIWAYAT PERCAKAPAN untuk memahami konteks jika user mengacu ke sesuatu yang sudah dibahas.
 - Jika data kosong, katakan SITA belum memiliki info tersebut.
 - JANGAN PERNAH mengarang tempat, harga, atau informasi lain.
 
@@ -94,8 +100,47 @@ JAWABAN SITA:
 
 
 # ─────────────────────────────────────────────────────────────
+# 2b. TEMPLATE PROMPT KHUSUS PLANNING
+#     Dipakai saat intent == "planning" agar LLM dapat instruksi lebih terarah
+# ─────────────────────────────────────────────────────────────
+
+PLANNING_PROMPT_TEMPLATE = """
+{system_prompt}
+
+═══════════════════════════════════════════
+KONTEKS SESI INI:
+- Intent: PLANNING / ITINERARY
+- Durasi yang diminta: {durasi_hari} hari
+- Budget per orang: {budget_info}
+- Lokasi user: {lokasi_info}
+
+═══════════════════════════════════════════
+DATA TEMPAT TERSEDIA (untuk bahan itinerary):
+{konteks_db}
+
+═══════════════════════════════════════════
+RIWAYAT PERCAKAPAN SEBELUMNYA:
+{riwayat}
+
+═══════════════════════════════════════════
+PERMINTAAN USER:
+{pertanyaan}
+
+INSTRUKSI KHUSUS PLANNING:
+- Buat itinerary untuk {durasi_hari} hari penuh menggunakan HANYA tempat dari DATA TEMPAT di atas.
+- Susun dengan urutan logis: pagi → siang → sore/malam. Pertimbangkan jarak antar tempat dalam 1 wilayah.
+- Distribusikan tipe tempat secara seimbang: ada wisata, kuliner, dan nongkrong/cafe setiap harinya jika data memungkinkan.
+- Sertakan jam buka dan estimasi harga dari data. Jika tidak ada di data, tulis "cek langsung di lokasi".
+- Jangan mengarang nama tempat yang tidak ada di DATA TEMPAT.
+- Setelah itinerary selesai, tambahkan saran singkat (transportasi, tips cuaca, dll).
+- Akhiri dengan kalimat: *"Untuk jadwal yang lebih lengkap, interaktif, dan estimasi biaya otomatis, SITA sarankan pakai fitur Rekomendasi Rencana (Planning) di menu utama ya!"*
+
+JAWABAN SITA:
+""".strip()
+
+
+# ─────────────────────────────────────────────────────────────
 # 3. TEMPLATE KONTEKS PER DOKUMEN
-#    Diisi oleh build_context() dari hasil retrieval DB
 # ─────────────────────────────────────────────────────────────
 
 DOC_TEMPLATE = """
@@ -161,53 +206,16 @@ def format_lokasi(wilayah: str | None, lat: float | None, lon: float | None) -> 
 
 
 # ─────────────────────────────────────────────────────────────
-# 5. CONTOH SKENARIO PERCAKAPAN (untuk testing)
-# ─────────────────────────────────────────────────────────────
-
-CONTOH_PERTANYAAN = [
-    # Rekomendasi umum
-    "Rekomendasiin tempat wisata bagus di Indramayu dong",
-    "Mau cari kuliner khas Cirebon yang enak dan murah",
-    "Ada tempat nongkrong kece di Majalengka gak?",
-
-    # Berbasis lokasi
-    "Saya lagi di Kuningan, tempat wisata alam terdekat apa?",
-    "Cafe atau kedai kopi yang cozy deket sini dong",
-
-    # Info spesifik
-    "Pantai Tirtamaya buka jam berapa?",
-    "Tiket masuk Telaga Remis berapa?",
-    "Nasi Lengko Ibu Tiri ada di mana?",
-
-    # Planning
-    "Mau wisata 2 hari di Cirebon, enaknya kemana aja?",
-    "Budget 200rb bisa wisata ke mana di Indramayu?",
-
-    # Edge cases (seharusnya dijawab dengan jujur)
-    "Restoran sushi terbaik di Indramayu",   # tidak relevan → redirect
-    "Harga hotel di Cirebon berapa?",         # di luar scope → jujur
-]
-
-EXPECTED_BEHAVIORS = {
-    "Rekomendasiin tempat wisata bagus di Indramayu dong":
-        "Menampilkan 3-5 tempat wisata Indramayu dengan rating tinggi + sentimen positif",
-
-    "Pantai Tirtamaya buka jam berapa?":
-        "Menjawab jam buka spesifik dari data, bukan mengarang",
-
-    "Restoran sushi terbaik di Indramayu":
-        "Menolak menjawab karena di luar topik, redirect ke kuliner khas lokal",
-}
-
-
-# ─────────────────────────────────────────────────────────────
-# 6. PROMPT FALLBACK (jika tidak ada hasil retrieval)
+# 5. PROMPT FALLBACK (jika tidak ada hasil retrieval)
 # ─────────────────────────────────────────────────────────────
 
 FALLBACK_PROMPT = """
 {system_prompt}
 
 Tidak ada data spesifik yang ditemukan di database untuk pertanyaan ini.
+
+RIWAYAT PERCAKAPAN SEBELUMNYA:
+{riwayat}
 
 PERTANYAAN USER: {pertanyaan}
 
@@ -221,8 +229,7 @@ JAWABAN SITA:
 
 
 # ─────────────────────────────────────────────────────────────
-# 7. PROMPT UNTUK DETEKSI INTENT (opsional — panggil Gemini sekali)
-#    Berguna jika ingin routing query ke endpoint yang tepat
+# 6. PROMPT UNTUK DETEKSI INTENT (opsional)
 # ─────────────────────────────────────────────────────────────
 
 INTENT_DETECTION_PROMPT = """
