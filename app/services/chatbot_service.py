@@ -410,7 +410,7 @@ class ChatbotService:
                 )) AS distance"""
             order_clause = "distance ASC"
 
-        where_parts = ["fts @@ to_tsquery('indonesian', :query)"]
+        where_parts = ["fts @@ plainto_tsquery('indonesian', :query)"]
         db_limit = 30 if is_planning else top_k
         params = {"query": query_str, "limit": db_limit}
 
@@ -430,7 +430,7 @@ class ChatbotService:
         where_clause = " AND ".join(where_parts)
 
         sql_fts = text(f"""
-            SELECT *, ts_rank(fts, to_tsquery('indonesian', :query)) as rank
+            SELECT *, ts_rank(fts, plainto_tsquery('indonesian', :query)) as rank
             {distance_col}
             FROM v_all_tempat
             WHERE {where_clause}
@@ -447,7 +447,7 @@ class ChatbotService:
             where_clause_no_tipe = " AND ".join(where_parts_no_tipe)
             params_no_tipe = {k: v for k, v in params.items() if k != "tipe"}
             sql_fallback = text(f"""
-                SELECT *, ts_rank(fts, to_tsquery('indonesian', :query)) as rank
+                SELECT *, ts_rank(fts, plainto_tsquery('indonesian', :query)) as rank
                 {distance_col}
                 FROM v_all_tempat
                 WHERE {where_clause_no_tipe}
